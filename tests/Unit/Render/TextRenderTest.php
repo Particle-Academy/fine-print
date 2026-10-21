@@ -334,12 +334,26 @@ it('maps codes to CIDs through an embedded CMap with cidrange and cidchar', func
 // --- what is not drawn, and is said -------------------------------------------------
 
 it('does not draw text in a font with no embedded program, and names the font', function () {
-    $pdf = PdfBuilder::textPdf([PdfBuilder::line('Hello', 10, 50).PdfBuilder::line('again', 10, 30).'BT /F1 9 Tf [(a) 5 (b)] TJ (c) \' ET'], ['mediaBox' => '[0 0 100 100]'])->build();
-    $r = Renderer::render($pdf);
+    // Optima is not a standard-14 face, so nothing bundled stands in for it.
+    $content = 'BT /F1 12 Tf 10 50 Td (Hello) Tj ET BT /F1 12 Tf 10 30 Td (again) Tj ET BT /F1 9 Tf [(a) 5 (b)] TJ (c) \' ET';
+    $r = Renderer::render(fptDoc($content, ['F1' => fptPlain('<< /Type /Font /Subtype /Type1 /BaseFont /Optima >>')]));
 
-    expect($r->skipped)->toBe([['kind' => 'text-unembedded', 'count' => 4, 'fonts' => ['Helvetica']]])
+    expect($r->skipped)->toBe([['kind' => 'text-unembedded', 'count' => 4, 'fonts' => ['Optima']]])
         ->and($r->complete())->toBeFalse()
         ->and(fptAt($r, 12, 52))->toBe(FPT_W);
+});
+
+it('draws non-embedded standard-14 text from the bundled fonts', function () {
+    $pdf = PdfBuilder::textPdf([PdfBuilder::line('Hello', 10, 50)], ['mediaBox' => '[0 0 100 100]'])->build();
+    $r = Renderer::render($pdf);
+    $ink = 0;
+    foreach ($r->rows() as $row) {
+        $ink += strlen($row) - substr_count($row, "\xFF");
+    }
+
+    expect($r->skipped)->toBe([])
+        ->and($r->complete())->toBeTrue()
+        ->and($ink)->toBeGreaterThan(50);
 });
 
 it('reports embedded CFF, Type 1 and Type 3 fonts as not drawn yet', function () {
@@ -419,14 +433,13 @@ it('draws what the P2 writer makes with an embedded font, completely', function 
         ->and($ink)->toBeGreaterThan(20);
 });
 
-it('reports the P2 writer\'s standard fonts as unembedded, by name', function () {
+it('draws the P2 writer\'s standard fonts completely', function () {
     $pdf = fpwWrite(['blocks' => [
         ['type' => 'heading', 'level' => 1, 'runs' => [['text' => 'Title']]],
         fpwPara('Body text.'),
     ]]);
     $r = Renderer::render($pdf, 1, 1.0);
 
-    expect($r->skipped)->toHaveCount(1)
-        ->and($r->skipped[0]['kind'])->toBe('text-unembedded')
-        ->and($r->skipped[0]['fonts'])->toBe(['Helvetica', 'Helvetica-Bold']);
+    expect($r->skipped)->toBe([])
+        ->and($r->complete())->toBeTrue();
 });

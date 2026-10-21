@@ -315,7 +315,7 @@ $r = Renderer::render($pdfBytes, 1, 2.0);
 $r->width; $r->height;      // pixels
 $r->png();                  // RGB PNG bytes
 $r->complete();             // false when anything on the page was NOT drawn
-$r->skipped;                // [['kind' => 'text-unembedded', 'count' => 12, 'fonts' => ['Helvetica']], ...]
+$r->skipped;                // [['kind' => 'text-unembedded', 'count' => 12, 'fonts' => ['Symbol']], ...]
 ```
 
 `scale` is pixels per point: 1.0 is 72 DPI. The page shown is the CropBox (cut
@@ -338,9 +338,18 @@ text matrix and the CTM. Render modes fill, stroke, fill and stroke, and
 invisible; the clipping modes paint and report the clip as skipped. Glyphs
 are drawn from their outlines, unhinted: hinting instructions are never run.
 
-**What is NOT drawn yet, and is listed in `skipped`:** text in a font with no
-embedded program (`text-unembedded`, which includes the standard 14 such as
-Helvetica: their outlines are not in the file and none are bundled), in CFF
+**Standard-14 text that is not embedded** (Helvetica, Times and Courier in all
+four styles, and Arial, Times New Roman and Courier New, which viewers treat
+as the same faces) is drawn from metric-compatible fonts bundled unmodified in
+`resources/fonts`: Liberation Sans 2.1.5, Tinos 1.340 and Cousine 1.241, all
+under the SIL Open Font License 1.1 (see `resources/fonts/NOTICE`). Where the
+PDF gives no `/Widths`, text advances by the standard 14's own widths, so it
+lands where the producer laid it out. The glyphs are these fonts' designs,
+not Adobe's, so they look close to, not identical with, another viewer's.
+
+**What is NOT drawn yet, and is listed in `skipped`:** text in any other font
+with no embedded program (`text-unembedded`, which includes Symbol and
+ZapfDingbats: nothing is bundled for them), in CFF
 (`text-cff`), Type 1 (`text-type1`) or Type 3 (`text-type3`) fonts, vertical
 text (`text-vertical`), predefined CJK CMaps (`text-cmap`), fonts that cannot
 be read (`text-font-invalid`) and single damaged glyphs (`text-glyph`);

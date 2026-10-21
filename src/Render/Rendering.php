@@ -29,7 +29,7 @@ namespace FinePrint\Render;
  * | `text-glyph` | glyphs whose outline is malformed or over a limit (per glyph; the rest of the text is drawn) |
  * | `text-type1` | text in an embedded Type 1 font |
  * | `text-type3` | text in a Type 3 font |
- * | `text-unembedded` | text in a font with no program in the file (the standard 14 among them) |
+ * | `text-unembedded` | text in a font with no program in the file that no bundled font stands in for (Symbol, ZapfDingbats, any non-standard face) |
  * | `text-vertical` | vertical text (Identity-V, WMode 1) |
  * | `transparency` | paint under constant alpha, a soft mask or a blend mode (drawn opaque) |
  *

@@ -91,9 +91,18 @@ the canvas, filled nonzero glyph by glyph, stroked through the P3a stroker.
   written.
 - **Font names in reports** are BaseFont stripped to `[A-Za-z0-9+_.-]`, at
   most 63 characters, at most 16 per kind (`RenderFont::cleanName()`).
-- **Non-embedded fonts are not drawn** (`text-unembedded`, with the name).
-  No font is bundled. The standard 14 need outlines from somewhere, which is
-  a third-party question for the owner, not a code change.
+- **Non-embedded standard-14 text draws from bundled fonts**
+  (`Glyphs\StandardFonts`, owner ruling 2026-10-21): Helvetica/Arial from
+  Liberation Sans 2.1.5, Times/Times New Roman from Tinos, Courier/Courier New
+  from Cousine, in `resources/fonts`, UNMODIFIED, their SHA-256 pinned in
+  `NOTICE` by a test. Chosen by measured WinAnsi widths against
+  `StandardMetrics` (Arimo differs on florin, so the sans is Liberation).
+  Only simple fonts (Type1/TrueType/MMType1) whose name is one of those faces
+  plus style words are substituted; Narrow, Black, Neue, Symbol,
+  ZapfDingbats and anything else stay `text-unembedded`. Without `/Widths`,
+  advances come from the standard widths by character, not from the bundled
+  font. Never subset, rename or edit a bundled file; replacing one means a
+  new NOTICE entry and hash.
 
 ## Encryption (owner ruling 2026-10-21: open empty-password files)
 
@@ -245,7 +254,8 @@ does a hostile file get out of this", never by which directory it is in.
 Pest, test-first. **Every PDF a test reads is written by `tests/Support`**
 (`PdfBuilder`, `Encoders`) **or by the writer itself**, and every font and
 image by `FontBuilder` / `ImageBuilder`. No downloaded files and no
-third-party producer. The one exception is the `local` group, which reads
+third-party producer. The bundled `resources/fonts` are read as the package
+reads them (`StandardFontsTest`, the `std14` golden). The other exception is the `local` group, which reads
 `C:/Windows/Fonts/DejaVuSans.ttf` when it exists and skips otherwise.
 Each security behaviour has a test that was red before it existed, and
 `tests/Unit/HostileInputTest.php` holds one fixture per attack. `composer test`
@@ -261,6 +271,11 @@ our encoder. Numbers and diff images land in `tests/.out/`. To regenerate,
 run the three scripts in `tests/oracle/` (Chromium + playwright-core are a
 TEST ORACLE on the developer's machine, never a dependency); `ONLY=a,b`
 limits `build.php` to some fixtures so the others' goldens are untouched.
+**The oracle never shows a window.** `chromium.cjs` launches only through
+Playwright, headless, with `--no-first-run`, Playwright's throwaway profile
+and a `finally` close, and refuses to start otherwise. Never run `chrome.exe`
+directly, not even `--version`: on Windows that opens a visible window with
+first-run onboarding on the owner's desktop.
 
 Text goldens: `glyphs` (written by `RenderFixtures`, snap-immune, strict
 bounds) and `p2-text` (written by the P2 writer) embed

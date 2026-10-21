@@ -1,0 +1,50 @@
+fine-print bundled fonts
+========================
+
+These fonts are third-party font software, bundled UNMODIFIED (no
+subsetting, renaming or re-encoding) so the renderer can draw standard-14
+text that a PDF does not embed. fine-print reads them; it never changes or
+re-distributes them separately. Each is licensed under the SIL Open Font
+License, Version 1.1, whose text is in the file named below for that family.
+
+Approved by the owner on 2026-10-21 (fonts are the one relaxed third-party
+category; see the envelope's RULES.md). Chosen by measuring each family's
+WinAnsi advance widths against fine-print's standard-14 tables
+(src/Writer/Fonts/StandardMetrics.php): Tinos and Cousine match exactly;
+Arimo, the Croscore sans, differs on one glyph (florin, 279 against 556), so
+the sans is Liberation Sans, which matches.
+
+Serif (Times-Roman, Times-Bold, Times-Italic, Times-BoldItalic; Times New Roman)
+  Tinos 1.340, by The Tinos Project Authors (Croscore)
+  Source: https://github.com/googlefonts/Tinos
+  Commit: 3b4482a99b80ea5fc75f187b1be3120a3f5905b3 (2026-04-27), fonts/ttf/
+  Licence: OFL-Tinos.txt
+
+Monospace (Courier, Courier-Bold, Courier-Oblique, Courier-BoldOblique; Courier New)
+  Cousine 1.241, by The Cousine Project Authors (Croscore)
+  Source: https://github.com/googlefonts/Cousine
+  Commit: c0fbdb438443968c884a5c13f5f9bee916a7f89b (2026-06-09, tag v1.241), fonts/ttf/
+  Licence: OFL-Cousine.txt
+
+Sans (Helvetica, Helvetica-Bold, Helvetica-Oblique, Helvetica-BoldOblique; Arial)
+  Liberation Sans 2.1.5, digitized data copyright 2010 Google Corporation,
+  copyright 2012 Red Hat, Inc. (Reserved Font Name "Liberation")
+  Source: https://github.com/liberationfonts/liberation-fonts
+  Release: 2.1.5 (2021-09-30), liberation-fonts-ttf-2.1.5.tar.gz
+    sha256 7191c669bf38899f73a2094ed00f7b800553364f90e2637010a69c0e268f25d0
+  Licence: LICENSE-Liberation.txt
+
+SHA-256 of every bundled file, as downloaded (a test fails if one changes):
+
+60a0e8ef0c04dd5dd69ffe91025fa2ae5836cbd35600a82ba031977557e2cb61  Tinos-Regular.ttf
+393269dbab8899f938db19783eca5eac92eb431f7ae0ab45b8349ca895f1a06b  Tinos-Bold.ttf
+5942266ed398b155d7dc23e36833e7ec6be988f2439bdbeb8ef1bede808eaa91  Tinos-Italic.ttf
+a5de79f0fe863ea0954757acb3d47b3ccd0a930ce3dd5b97230cd3866790a06e  Tinos-BoldItalic.ttf
+5a57f0184000371cb22fe3fcea4c500354cab1a69efaf7beaf3e6eca6ecfefea  Cousine-Regular.ttf
+331215ec6445f41e98d8971251bb6237e722907f4101faae990583accfe79545  Cousine-Bold.ttf
+afb869eee8643d09915c3286edb61dad66278ceb1511c79b474ce21548421bcd  Cousine-Italic.ttf
+7f804549c941ceaac0a9635389ed09c4bbc86e4bfe37589191dacd1b5b0e26a5  Cousine-BoldItalic.ttf
+76d04c18ea243f426b7de1f3ad208e927008f961dc5945e5aad352d0dfde8ee8  LiberationSans-Regular.ttf
+788abee4c806d660e8aee46689dd8540cd4bb98da03dcc9d171ce3efd99a9173  LiberationSans-Bold.ttf
+e5bae5c4cde31f22142753855f4f8fb86da6ff39955ed3c0a11248b0d16948b0  LiberationSans-Italic.ttf
+698da70fc191cc5f33ad4d6d3fe830fe4624b898ea2e3169955928b7c491f1ee  LiberationSans-BoldItalic.ttf

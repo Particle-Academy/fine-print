@@ -24,7 +24,8 @@ use FinePrint\Writer\Fonts\TrueType;
  * an embedded encoding CMap and a CIDToGIDMap. Everything else is not drawn
  * and says why in `skip`, a `skipped` kind:
  *
- *   text-unembedded   no font program in the file (the standard 14 among them)
+ *   text-unembedded   no font program in the file, and no bundled stand-in
+ *                     (the twelve standard text faces draw from {@see StandardFonts})
  *   text-cff          CFF programs (Type1C, CIDFontType0C, OpenType CFF)
  *   text-type1        Type 1 programs (FontFile)
  *   text-type3        Type 3 fonts
@@ -53,6 +54,9 @@ final class RenderFont
     private ?string $cidToGid = null;
 
     private ?CMap $encoding = null;
+
+    /** @var ?array<string, int> UTF-8 => width, for a standard-14 face drawn from a bundled font */
+    private ?array $standardWidths = null;
 
     /** @var ?array<string, int> UTF-8 => Mac OS Roman code */
     private static ?array $macRoman = null;
@@ -112,7 +116,7 @@ final class RenderFont
 
         $fd = $doc->resolve($descriptorOwner->get('FontDescriptor'));
         if (! $fd instanceof PdfDict) {
-            return self::skipped($name, $text, 'text-unembedded');
+            return self::standard($dict, $subtype, $name, $text) ?? self::skipped($name, $text, 'text-unembedded');
         }
         $flags = $doc->resolve($fd->get('Flags'));
         $program = null;
@@ -135,7 +139,7 @@ final class RenderFont
             break;
         }
         if ($program === null) {
-            return self::skipped($name, $text, 'text-unembedded');
+            return self::standard($dict, $subtype, $name, $text) ?? self::skipped($name, $text, 'text-unembedded');
         }
         if (str_starts_with($program, 'OTTO')) {
             return self::skipped($name, $text, 'text-cff');
@@ -152,6 +156,33 @@ final class RenderFont
         $f->symbolic = is_int($flags) && ($flags & 4) !== 0;
         $f->cidToGid = $cidToGid;
         $f->encoding = $encoding;
+
+        return $f;
+    }
+
+    /**
+     * A simple font with no program that names a standard-14 text face (or
+     * Arial / Times New Roman / Courier New): drawn from the bundled outline
+     * ({@see StandardFonts}), advancing by the standard widths where the PDF
+     * gives none. Null for anything else, which stays text-unembedded.
+     */
+    private static function standard(PdfDict $dict, ?string $subtype, string $name, Font $text): ?self
+    {
+        if (! in_array($subtype, ['Type1', 'TrueType', 'MMType1'], true)) {
+            return null;
+        }
+        $face = StandardFonts::match($dict->name('BaseFont') ?? '');
+        $tt = $face !== null ? StandardFonts::font($face) : null;
+        if ($face === null || $tt === null) {
+            return null;
+        }
+        $f = new self($name, null, (int) @filesize(StandardFonts::file($face)));
+        $f->glyphs = new TrueTypeGlyphs($tt);
+        $f->text = $text;
+        // The bundled font is a Unicode font: select glyphs by the code's
+        // character, whatever the PDF's symbolic flag says.
+        $f->symbolic = false;
+        $f->standardWidths = StandardFonts::widths($face);
 
         return $f;
     }
@@ -209,7 +240,12 @@ final class RenderFont
                 continue;
             }
             $gid = $this->gids[$code] ?? $this->remember($code, $this->simpleGlyph($c, $tt));
-            yield [$gid, $text->explicitWidth($c) ?? $tt->advance($gid) * 1000 / $tt->unitsPerEm, $c === 32];
+            $w = $text->explicitWidth($c);
+            if ($w === null && $this->standardWidths !== null) {
+                $u = $text->encodingUnicode($c);
+                $w = $u !== null && isset($this->standardWidths[$u]) ? (float) $this->standardWidths[$u] : null;
+            }
+            yield [$gid, $w ?? $tt->advance($gid) * 1000 / $tt->unitsPerEm, $c === 32];
         }
     }
 

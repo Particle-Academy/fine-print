@@ -146,6 +146,7 @@ final class RenderFixtures
     public const TEXT_SCALES = [
         'glyphs' => [1, 2],
         'p2-text' => [1, 2],
+        'std14' => [1, 2],
     ];
 
     /** Snap-immune fixtures, held to the strict tolerance. */
@@ -199,6 +200,35 @@ final class RenderFixtures
             ];
 
             return \FinePrint\Agent::toBytes(['blocks' => $blocks], ['fonts' => ['Fp' => FontBuilder::outlined()]]);
+        }
+
+        if ($name === 'std14') {
+            // The twelve standard text faces, none embedded: Chromium draws
+            // them from its own substitutes (on Windows, Arial / Times New
+            // Roman / Courier New); we draw them from resources/fonts.
+            // WinAnsi text with accents, figures and punctuation; origins
+            // on half points.
+            $faces = ['Helvetica', 'Helvetica-Bold', 'Helvetica-Oblique', 'Helvetica-BoldOblique',
+                'Times-Roman', 'Times-Bold', 'Times-Italic', 'Times-BoldItalic',
+                'Courier', 'Courier-Bold', 'Courier-Oblique', 'Courier-BoldOblique'];
+            $b = new PdfBuilder();
+            $cat = $b->reserve();
+            $tree = $b->reserve();
+            $res = '';
+            $content = '';
+            foreach ($faces as $i => $face) {
+                $f = $b->object('<< /Type /Font /Subtype /Type1 /BaseFont /'.$face.' /Encoding /WinAnsiEncoding >>');
+                $res .= '/F'.$i.' '.$f.' 0 R ';
+                $y = 750 - 60 * $i;
+                $content .= 'BT /F'.$i.' 22 Tf 30 '.$y.' Td '.PdfBuilder::lit("Quick brown fox \xC4\xC9 0123 & (W?)").' Tj ET'."\n";
+                $content .= 'BT /F'.$i.' 11 Tf 30.5 '.($y - 22).' Td '.PdfBuilder::lit('Sphinx of black quartz, judge my vow. $9.99 - 50%').' Tj ET'."\n";
+            }
+            $c = $b->stream($content);
+            $page = $b->object('<< /Type /Page /Parent '.$tree.' 0 R /Contents '.$c.' 0 R /Resources << /Font << '.$res.'>> >> >>');
+            $b->object('<< /Type /Pages /Kids ['.$page.' 0 R] /Count 1 /MediaBox [0 0 612 792] >>', $tree);
+            $b->object('<< /Type /Catalog /Pages '.$tree.' 0 R >>', $cat);
+
+            return $b->build();
         }
 
         // 'glyphs': written here, origins on half points.

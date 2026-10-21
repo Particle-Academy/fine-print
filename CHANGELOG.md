@@ -173,6 +173,21 @@ BREAKING and says what a consumer must do.
   copies limits with some values changed.
 - `Document::page()` (one page's dictionary, boxes, rotation and resources) and
   `Document::pageContents()`.
+- **Standard-14 text that is not embedded is now drawn** (owner ruling
+  2026-10-21). Helvetica, Times and Courier in all four styles, and Arial,
+  Times New Roman and Courier New (including `ArialMT`, `Arial,Bold`,
+  `TimesNewRomanPS-BoldMT` and the like), draw from fonts bundled UNMODIFIED
+  in `resources/fonts`: Liberation Sans 2.1.5 (2021-09-30), Tinos 1.340
+  (2026-04-27) and Cousine 1.241 (2026-06-09), all SIL OFL 1.1, with their
+  licences and a NOTICE giving sources and SHA-256. Chosen by measuring WinAnsi
+  advance widths against the standard-14 tables. Tinos and Cousine match
+  exactly. Arimo, the newer sans, differs on florin, so the sans is
+  Liberation. Without `/Widths`, text advances by the standard 14's own
+  widths. `text-unembedded` no longer appears for these faces; Symbol,
+  ZapfDingbats and other faces (Arial Narrow, Helvetica Neue, ...) are still
+  reported. The package grows by 5.1 MB of font data. Nothing to do as a
+  consumer: pages that reported `text-unembedded` for these fonts are now
+  `complete()`.
 
 ### Changed
 

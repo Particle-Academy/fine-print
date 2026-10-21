@@ -27,14 +27,40 @@ async function shot(browser, pdf, job, out) {
   await ctx.close();
 }
 
-(async () => {
-  const browser = await chromium.launch({ executablePath: exe, headless: true });
-  console.log('Chromium', browser.version());
-  for (const job of jobs) {
-    await shot(browser, job.pdf, job, job.shot);
-    await shot(browser, job.cal, job, job.calShot);
-    console.log('shot', job.name + '@' + job.scale + 'x');
+// NEVER on the owner's desktop. Only through Playwright's launcher, always
+// headless, never first-run UI, always closed. Never run chrome.exe directly
+// (not even `chrome.exe --version`: on Windows that opens a visible window
+// with first-run onboarding; it happened 2026-10-21). The version comes from
+// browser.version() below.
+const LAUNCH = {
+  executablePath: exe,
+  headless: true, // Playwright's new headless mode; the PDF viewer works in it
+  args: ['--no-first-run', '--no-default-browser-check'],
+  // Playwright gives launch() a throwaway profile in the temp folder and
+  // deletes it on close; a --user-data-dir would point it somewhere real.
+};
+
+function refuseUnlessHeadless(options) {
+  const args = options.args || [];
+  if (options.headless !== true || args.some((a) => /^--(headed|user-data-dir|start-maximized)/.test(a))
+    || process.env.HEADED || process.env.PWDEBUG) {
+    console.error('Refused: the oracle only ever runs headless with a throwaway profile.');
+    process.exit(3);
   }
-  fs.writeFileSync(path.join(__dirname, '..', '.out', 'oracle', 'chromium-version.txt'), browser.version());
-  await browser.close();
+}
+
+(async () => {
+  refuseUnlessHeadless(LAUNCH);
+  const browser = await chromium.launch(LAUNCH);
+  try {
+    console.log('Chromium', browser.version());
+    for (const job of jobs) {
+      await shot(browser, job.pdf, job, job.shot);
+      await shot(browser, job.cal, job, job.calShot);
+      console.log('shot', job.name + '@' + job.scale + 'x');
+    }
+    fs.writeFileSync(path.join(__dirname, '..', '.out', 'oracle', 'chromium-version.txt'), browser.version());
+  } finally {
+    await browser.close();
+  }
 })();

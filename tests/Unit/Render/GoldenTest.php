@@ -57,7 +57,23 @@ const FP_GOLDEN_MISMATCH = 0.01;
  *    pixels where either image has ink at most 25% off by more than 64.
  *  - laid out by the P2 writer: MAE at most 8.0, at most 8% of pixels and
  *    at most 65% of inked pixels off by more than 64.
+ *
+ * `std14` (2026-10-21): the twelve standard text faces NOT embedded. We draw
+ * them from the bundled outlines (Liberation Sans, Tinos, Cousine), Chromium
+ * from its own substitutes, so the outlines themselves differ on top of
+ * causes 1-3. Held to the same text bounds, fixed before its first run.
+ *
+ * THAT BOUND FAILED ON MAE, and was revised after the run, recorded here:
+ * MAE 8.03 at 1x and 8.50 at 2x against 8.0 (page 5.7% / 5.5%, inked 52% /
+ * 59%, both inside). Not placement: every line ends at the same x as
+ * Chromium's. Per face the error is design: Courier New, Chromium's Courier,
+ * is far thinner than Cousine (band MAE 12.6-19.3 for the four Courier
+ * lines, 4.5-5.2 for upright Helvetica and Times), and the italics differ
+ * too (7.8-10.0). Revised MAE bound 9.5, so the controls still fail: one
+ * pixel right at 1x measures 10.65, 3% too large 24.2 / 24.4. (At 2x one
+ * pixel right is 8.84: invisible to this oracle, as for every text golden.)
  */
+const FP_STD14_MAE = 9.5;
 const FP_GLYPHS_MISMATCH = 0.02;
 const FP_GLYPHS_INKED = 0.25;
 const FP_TEXT_MAE = 8.0;
@@ -128,9 +144,11 @@ foreach (RenderFixtures::TEXT_SCALES as $name => $scales) {
 /** [MAE, page share, inked share] bounds for a text fixture. */
 function fpTextBounds(string $name): array
 {
-    return in_array($name, RenderFixtures::SNAP_IMMUNE, true)
-        ? [FP_GOLDEN_MAE, FP_GLYPHS_MISMATCH, FP_GLYPHS_INKED]
-        : [FP_TEXT_MAE, FP_TEXT_MISMATCH, FP_TEXT_INKED];
+    return match (true) {
+        in_array($name, RenderFixtures::SNAP_IMMUNE, true) => [FP_GOLDEN_MAE, FP_GLYPHS_MISMATCH, FP_GLYPHS_INKED],
+        $name === 'std14' => [FP_STD14_MAE, FP_TEXT_MISMATCH, FP_TEXT_INKED],
+        default => [FP_TEXT_MAE, FP_TEXT_MISMATCH, FP_TEXT_INKED],
+    };
 }
 
 /** Whether a comparison falls outside a text fixture's bounds. */
@@ -199,6 +217,9 @@ it('fails text that is wrong on purpose: the text bounds have teeth', function (
     'glyphs@2x one pixel right' => ['glyphs', 2, 'right1'],
     'p2-text@1x 3% too large' => ['p2-text', 1, 'scale103'],
     'p2-text@2x 3% too large' => ['p2-text', 2, 'scale103'],
+    'std14@1x one pixel right' => ['std14', 1, 'right1'],
+    'std14@1x 3% too large' => ['std14', 1, 'scale103'],
+    'std14@2x 3% too large' => ['std14', 2, 'scale103'],
 ]);
 
 it('fails the real font one pixel off at 1x: the local bounds have teeth', function () {

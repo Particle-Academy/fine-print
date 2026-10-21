@@ -1,3 +1,6 @@
 # Golden PDFs are pinned by SHA-256 and PNGs are compared pixel for pixel:
 # never let git rewrite their line endings.
 tests/golden/** binary
+
+# Bundled fonts are third-party files pinned by SHA-256 in resources/fonts/NOTICE.
+resources/fonts/*.ttf binary
