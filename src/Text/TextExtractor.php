@@ -12,6 +12,7 @@ use FinePrint\Objects\PdfName;
 use FinePrint\Objects\PdfRef;
 use FinePrint\Objects\PdfStream;
 use FinePrint\Objects\PdfString;
+use FinePrint\Parser\InlineImage;
 use FinePrint\Parser\Keyword;
 use FinePrint\Parser\Parser;
 use FinePrint\Parser\PdfSyntaxException;
@@ -269,7 +270,7 @@ final class TextExtractor
 
                 return;
             case 'BI':
-                $this->skipInlineImage($p);
+                InlineImage::skip($p);
 
                 return;
             case 're':
@@ -498,39 +499,6 @@ final class TextExtractor
             array_pop($this->forms);
             [$this->gs, $this->stack, $this->tm, $this->tlm] = $saved;
         }
-    }
-
-    /**
-     * BI <dict pairs> ID <binary> EI. The binary can contain anything,
-     * including the bytes "EI", so the end is "EI" between whitespace (or a
-     * delimiter / end of data) — the rule viewers use.
-     */
-    private function skipInlineImage(Parser $p): void
-    {
-        while (true) {
-            try {
-                $v = $p->parseValue();
-            } catch (PdfSyntaxException) {
-                return;
-            }
-            if ($v instanceof Keyword && $v->word === 'ID') {
-                break;
-            }
-        }
-        $data = $p->data();
-        $pos = $p->position() + 1;
-        $len = strlen($data);
-        while (($i = strpos($data, 'EI', $pos)) !== false) {
-            $before = $data[$i - 1] ?? ' ';
-            $after = $data[$i + 2] ?? ' ';
-            if (strspn($before, " \t\r\n\f\0") === 1 && ($i + 2 >= $len || strspn($after, " \t\r\n\f\0/[<(") === 1)) {
-                $p->seek($i + 2);
-
-                return;
-            }
-            $pos = $i + 2;
-        }
-        $p->seek($len);
     }
 
     /** @param list<mixed> $o @return list<float> */

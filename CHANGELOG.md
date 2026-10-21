@@ -120,6 +120,37 @@ BREAKING and says what a consumer must do.
   directions: it reads our RC4 and AES fixtures, and we read its
   permission-only export with the right flags.
 
+- **A page renderer, first step: vector paths to PNG** (`FinePrint\Render\Renderer`).
+  `Renderer::render($pdf, $page, $scale)` returns a `Rendering` (size,
+  `png()`, `pixel()`, `rows()`, `skipped`, `complete()`, `warnings`);
+  `Renderer::png()` is the one-call form. Pure PHP: an exact-area
+  anti-aliasing scanline rasteriser, nonzero and even-odd fills, Bézier
+  flattening, strokes with widths, caps, joins, miter limits and dashes (in
+  user space, so a skewed or squashed transform draws the elliptical pen PDF
+  specifies), DeviceGray / DeviceRGB / DeviceCMYK colour (CMYK by the simple
+  formula), ICC-based / CalGray / CalRGB by channel count, `cm`, `q`/`Q`,
+  ExtGState line settings, form XObjects, CropBox cut to MediaBox, and
+  `/Rotate`. Compared against Chromium (PDFium) on 16 committed goldens: mean
+  absolute error 0.001 to 1.19 per channel (of 255), at most 0.64% of pixels
+  off by more than 64. A 17th, CMYK, matches in shape but not colour, because
+  PDFium converts CMYK through a press profile.
+- **What the renderer does NOT draw yet is reported, never hidden**:
+  `skipped` lists text, images, inline images, clipping, shadings, patterns,
+  transparency (drawn opaque), Separation/DeviceN colour (drawn as grey),
+  annotation appearances, optional-content visibility and forms past the depth
+  limit, with counts. `complete()` is false when anything is listed.
+- **A PNG encoder** (`FinePrint\Render\PngEncoder`) on the bundled zlib: RGB
+  and RGBA, all five row filters plus adaptive selection. Unfiltered is the
+  default, by measurement: for rendered pages it is about thirty times faster
+  for at most a tenth more bytes.
+- **Render limits** in `FinePrint\Limits`: `maxRenderPixels` (25,000,000,
+  judged before the raster is allocated; refusal reason `too_many_pixels`) and
+  `renderTimeSeconds` (30, the render's own clock). `maxOperators` and
+  `maxFormDepth` apply to rendering as they do to reading. `Limits::with()`
+  copies limits with some values changed.
+- `Document::page()` (one page's dictionary, boxes, rotation and resources) and
+  `Document::pageContents()`.
+
 ### Changed
 
 - **Encrypted files are no longer all refused.** One that needs a real password
@@ -132,6 +163,10 @@ BREAKING and says what a consumer must do.
   consumer reading the existing keys needs to do nothing.
 - `AgentReadGuard::apply()` also returns `acted`: the findings its policy cut
   or withheld on (empty under `flag`).
+- `RefusedException::REASONS` gains `too_many_pixels` (rendering only). A
+  consumer matching the existing reasons needs to do nothing.
+- Inline-image skipping moved into `Parser\InlineImage`, shared by the text
+  extractor and the renderer. No behaviour change.
 
 ### Fixed
 

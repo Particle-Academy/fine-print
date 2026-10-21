@@ -41,7 +41,25 @@ final class Limits
         public readonly float $timeSeconds = 30.0,
         /** Memory growth from open, in bytes. A guard rail; memory_limit stays the hard ceiling. */
         public readonly int $memoryBytes = 256 * 1024 * 1024,
+        /**
+         * Pixels in one rendered page (width x height), judged BEFORE the
+         * raster is allocated. 25 million is an A4 page at about 430 DPI
+         * (scale 6) and costs 75 MB of raster.
+         */
+        public readonly int $maxRenderPixels = 25_000_000,
+        /** Wall-clock budget for rendering one page, from the call, in seconds. */
+        public readonly float $renderTimeSeconds = 30.0,
     ) {}
+
+    /**
+     * A copy with some values replaced.
+     *
+     * @param  array<string, int|float>  $changes
+     */
+    public function with(array $changes): self
+    {
+        return self::from([...get_object_vars($this), ...$changes]);
+    }
 
     /**
      * From a Limits, null (the defaults) or an array of the constructor's

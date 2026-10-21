@@ -1,0 +1,3 @@
+# Golden PDFs are pinned by SHA-256 and PNGs are compared pixel for pixel:
+# never let git rewrite their line endings.
+tests/golden/** binary

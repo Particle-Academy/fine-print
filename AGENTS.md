@@ -14,9 +14,10 @@ preference: no GD, Imagick, Ghostscript, poppler, MuPDF, smalot/pdfparser,
 FPDF, TCPDF or dompdf, and no shelling out to a binary. Needing anything else
 is an approval request to the owner. It is never a `composer require`.
 
-P1 is the reader plus the security layer; P2 is the writer (`src/Writer`). The
-renderer and Laravel serving are later phases. See `.ai/plans/fine-print.md`
-in the envelope.
+P1 is the reader plus the security layer; P2 is the writer (`src/Writer`);
+P3a is the renderer core (`src/Render`: vector paths to PNG). Text, images,
+clipping and transparency in the renderer (P3b-d) and Laravel serving (P4) are
+later. See `.ai/plans/fine-print.md` in the envelope.
 
 | layer | where | trusts its input? |
 |---|---|---|
@@ -27,6 +28,37 @@ in the envelope.
 | parser, filters, fonts | `src/Parser`, `src/Filters`, `src/Text` | no |
 | writer: model, layout, PDF syntax | `src/Writer` | no. The document comes from an agent, which may have copied it from a hostile file |
 | TrueType reader, PNG/JPEG readers | `src/Writer/Fonts`, `src/Writer/Images` | no. Host fonts and image data URLs may be user uploads |
+| renderer: interpreter, rasteriser, stroker, PNG | `src/Render` | no. It runs every operator of a hostile page |
+
+## The renderer (P3a)
+
+`Renderer::render()` → page box (CropBox ∩ MediaBox, `/Rotate`) and the base
+matrix → `Interpreter` (content operators, `GraphicsState`, `Path` in user
+space, `ColourSpace`) → fills through `Rasterizer`, strokes through `Stroker`
+(user space, so a non-uniform CTM gives an elliptical pen) then `Rasterizer`
+→ `Raster` (one RGB byte string per row) → `PngEncoder`.
+
+Renderer invariants:
+
+- **Judge the pixel count before allocating.** `maxRenderPixels` is checked on
+  floats, before any int cast or `Raster`. A MediaBox of 10^7 points must cost
+  nothing.
+- **Every operator counts**, page and forms together, against `maxOperators`;
+  forms carry a visited stack and the `maxFormDepth` cap; the `q` stack is
+  capped (overflow is counted, not stored). The render has its OWN `Budget`
+  (`renderTimeSeconds`), separate from the document's.
+- **Everything not drawn is reported in `skipped`.** Adding a kind means adding
+  it to `Rendering::KINDS` and the README. Never draw less silently: a page
+  image missing content that claims to be complete is the failure this exists
+  to prevent.
+- **Work per edge is bounded by the canvas, not by coordinates.** The
+  rasteriser clips rows to the canvas and projects anything left of it onto
+  x = 0; Bézier flattening is capped at `Bezier::MAX_SEGMENTS`; a dash pattern
+  that would make more than `Stroker::MAX_DASHES` dashes is drawn solid. Every
+  operand passes `Interpreter::numbers()`, which turns INF/NAN into 0.
+- **Stroke polygons are all emitted with one orientation.** Nonzero filling
+  then unions them; mixed orientations would cancel where a join overlaps a
+  segment.
 
 ## Encryption (owner ruling 2026-10-21: open empty-password files)
 
@@ -135,6 +167,21 @@ does a hostile file get out of this", never by which directory it is in.
   header-row list explicitly for that reason.
 - `StandardMetrics` is generated data. Regenerate it with the envelope's
   `sandbox/fine-print/p2/metrics.php` + `emit-metrics.php`, never by hand.
+- **Chromium's PDF viewer is an exact oracle only at some geometries**
+  (measured 2026-10-21, Chromium 156). At zoom 150 with device scale 1, one
+  point is exactly 2 px, but only for some page sizes: 200x150 pt comes out
+  0.34% taller and 0.06 px off the pixel grid. At zoom 75 a 200 pt page is
+  drawn 201 px wide. Golden fixtures use measured-exact sizes, scale-1 goldens
+  are the zoom-150 render averaged 2x2, and `tests/oracle/crop.php` refuses an
+  off-grid page. Calibrate with anti-aliased TRIANGLES, never bars.
+- **PDFium snaps axis-aligned rectangle fills to whole pixels** (no
+  anti-aliasing on their edges, by its own rounding). We anti-alias them by
+  exact coverage. That difference is most of the remaining error in the
+  `rects` goldens. Do not "fix" it by copying PDFium's rounding without
+  deciding it is wanted.
+- **PDFium spaces zero-length dashes slightly apart** (`[0 12]` gives dots
+  every 12.1 pt), so a long dotted line drifts against Chromium. Ours are at
+  exact multiples, which is what the spec says.
 
 ## Tests
 
@@ -146,3 +193,13 @@ third-party producer. The one exception is the `local` group, which reads
 Each security behaviour has a test that was red before it existed, and
 `tests/Unit/HostileInputTest.php` holds one fixture per attack. `composer test`
 runs the suite.
+
+Renderer goldens: `tests/golden/<name>.pdf` (written by
+`tests/Support/RenderFixtures`) and `<name>@<scale>x.png` (Chromium's
+rendering of it). `GoldenTest` rebuilds each PDF and fails if it no longer
+matches the committed one, then compares with `tests/Support/ImageDiff` (mean
+absolute error and share of pixels off by more than 64, a 2 px frame
+excluded); `tests/Support/PngReader` is a PNG decoder written separately from
+our encoder. Numbers and diff images land in `tests/.out/`. To regenerate,
+run the three scripts in `tests/oracle/` (Chromium + playwright-core are a
+TEST ORACLE on the developer's machine, never a dependency).

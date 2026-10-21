@@ -9,6 +9,21 @@ use FinePrint\Tests\Support\PdfBuilder;
  * see PdfBuilder for why.
  */
 
+/**
+ * Renderer helper: a one-page PDF with the given content stream, page
+ * dictionary extras and resources. Extra objects added by `$extra` are
+ * numbered from 6 (textPdf: catalog 1, tree 2, font 3, content 4, page 5).
+ */
+function fprPage(string $content, string $mediaBox = '[0 0 100 100]', string $page = '', string $resources = '', ?callable $extra = null): string
+{
+    $b = PdfBuilder::textPdf([$content], ['mediaBox' => $mediaBox, 'page' => $page, 'resources' => $resources]);
+    if ($extra !== null) {
+        $extra($b);
+    }
+
+    return $b->build();
+}
+
 /** A one-or-more page PDF of plain Helvetica text lines. */
 function fpText(string ...$pages): string
 {

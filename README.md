@@ -14,9 +14,10 @@ active content into them.
 no third-party PDF library. Just PHP 8.4 and its bundled `zlib`, `mbstring`,
 `ctype` and `json`.
 
-> **Status: 0.x, reader and writer.** A page renderer (PNG) and Laravel
-> page-image serving are planned later phases, not part of this release.
-> Pre-1.0, breaking changes may land in a minor release; the
+> **Status: 0.x, reader and writer, plus the first step of a page renderer.**
+> The renderer draws vector paths only so far (see [Rendering pages](#rendering-pages));
+> text, images and clipping are later steps, and Laravel page-image serving is a
+> later phase. Pre-1.0, breaking changes may land in a minor release; the
 > [changelog](CHANGELOG.md) marks each one.
 
 ## Why
@@ -180,6 +181,8 @@ Agent::read($pdf, ['limits' => ['maxPages' => 200, 'timeSeconds' => 5]]);
 | `maxPages` | 50,000 | `too_many_pages` |
 | `timeSeconds` | 30 | `time_budget` |
 | `memoryBytes` | 256 MB growth | `memory_budget` |
+| `maxRenderPixels` | 25,000,000 per rendered page | `too_many_pixels` (judged before the raster is allocated) |
+| `renderTimeSeconds` | 30 per rendered page | `time_budget` |
 
 Other refusals are `not_pdf`, `corrupt` and `encrypted`. A refusal message
 never quotes the file.
@@ -297,6 +300,45 @@ model reaches the file only as hex strings, and zero-width, bidi-control and
 tag characters are removed, so the writer cannot be used to smuggle hidden
 text. Everything it writes reads back through `Agent::read()` with no guard
 findings.
+
+## Rendering pages
+
+For hosts: render a page to PNG, in pure PHP. Serving page *images* instead of
+the PDF is what makes "no download, no print" meaningful in a viewer.
+
+```php
+use FinePrint\Render\Renderer;
+
+$png = Renderer::png($pdfBytes, page: 1, scale: 2.0);   // 144 DPI
+
+$r = Renderer::render($pdfBytes, 1, 2.0);
+$r->width; $r->height;      // pixels
+$r->png();                  // RGB PNG bytes
+$r->complete();             // false when anything on the page was NOT drawn
+$r->skipped;                // [['kind' => 'text', 'count' => 12], ...]
+```
+
+`scale` is pixels per point: 1.0 is 72 DPI. The page shown is the CropBox (cut
+to the MediaBox), turned by `/Rotate`, on white. A `Document` already open can
+be passed instead of bytes.
+
+**What is drawn so far:** filled and stroked paths (even-odd and nonzero,
+Bézier curves, line widths, caps, joins, miter limits, dashes), anti-aliased
+by exact pixel coverage; DeviceGray, DeviceRGB and DeviceCMYK colour (CMYK by
+the simple formula, so it differs from a press profile), ICC-based, CalGray
+and CalRGB colour by their channel count; `cm` transforms, `q`/`Q`, line
+settings from ExtGState, and form XObjects.
+
+**What is NOT drawn yet, and is listed in `skipped`:** text, images and inline
+images, clipping, shadings, patterns, transparency (drawn opaque), Separation
+and DeviceN colour (drawn as grey), annotation appearances, and optional-content
+visibility (everything is drawn). Check `complete()` before treating a render
+as the whole page.
+
+Rendering is bounded like reading: the pixel count is judged before anything
+is allocated, every operator counts against `maxOperators`, forms nest at most
+`maxFormDepth` deep and never into themselves, and each render has its own
+time budget (see [Hostile input](#hostile-input)).
 
 ## License
 

@@ -24,7 +24,8 @@ final class Budget
 
     private int $ticks = 0;
 
-    public function __construct(public readonly Limits $limits)
+    /** @param string $activity what is being budgeted, for refusal messages ("Reading", "Rendering") */
+    public function __construct(public readonly Limits $limits, private readonly string $activity = 'Reading')
     {
         $this->deadline = hrtime(true) + (int) ($limits->timeSeconds * 1e9);
         $this->memoryStart = memory_get_usage();
@@ -43,10 +44,10 @@ final class Budget
     public function check(): void
     {
         if (hrtime(true) > $this->deadline) {
-            throw new RefusedException('time_budget', 'Reading took longer than the '.$this->limits->timeSeconds.'s time budget.');
+            throw new RefusedException('time_budget', $this->activity.' took longer than the '.$this->limits->timeSeconds.'s time budget.');
         }
         if (memory_get_usage() - $this->memoryStart > $this->limits->memoryBytes) {
-            throw new RefusedException('memory_budget', 'Reading needed more than the '.$this->limits->memoryBytes.'-byte memory budget.');
+            throw new RefusedException('memory_budget', $this->activity.' needed more than the '.$this->limits->memoryBytes.'-byte memory budget.');
         }
     }
 

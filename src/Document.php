@@ -302,6 +302,28 @@ final class Document
         return $out;
     }
 
+    /**
+     * One page's dictionary and its inherited geometry and resources, for the
+     * renderer. Pages are numbered from 1.
+     *
+     * @return array{number: int, dict: PdfDict, ref: ?PdfRef, mediaBox: list<float>, cropBox: list<float>, rotate: int, resources: ?PdfDict}
+     */
+    public function page(int $page): array
+    {
+        $p = $this->pageList()[$page - 1] ?? null;
+        if ($p === null) {
+            throw new \OutOfRangeException('No page '.$page);
+        }
+
+        return $p;
+    }
+
+    /** A page's content streams, decoded and joined (opaque ones read as empty). */
+    public function pageContents(int $page): string
+    {
+        return $this->pageContent($this->page($page)['dict']);
+    }
+
     /** A page's text in reading order. Pages are numbered from 1. */
     public function text(int $page): string
     {

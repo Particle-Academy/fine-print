@@ -27,6 +27,7 @@ final class RefusedException extends RuntimeException
         'too_many_operators',
         'time_budget',
         'memory_budget',
+        'too_many_pixels',
     ];
 
     public function __construct(public readonly string $reason, string $message)
