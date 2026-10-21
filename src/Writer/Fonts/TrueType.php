@@ -67,14 +67,109 @@ final class TrueType
     /** @var list<array{0: int, 1: int, 2: int}> format 12 groups: start, end, startGlyph */
     private array $format12 = [];
 
+    /** @var array<string, int> "platform,encoding" => subtable offset in the file (first of each) */
+    private array $subtables = [];
+
+    /** @var array<string, array{format: int, data: mixed}> decoded subtables, by "platform,encoding" */
+    private array $decoded = [];
+
+    private bool $requireUnicodeCmap = true;
+
     private function __construct(private readonly string $data) {}
 
-    public static function parse(string $bytes): self
+    /**
+     * @param  bool  $requireUnicodeCmap  the writer needs a Unicode cmap to encode text; a font embedded
+     *                                    in a PDF often has only a (3,0) or (1,0) one, or none
+     */
+    public static function parse(string $bytes, bool $requireUnicodeCmap = true): self
     {
         $tt = new self($bytes);
+        $tt->requireUnicodeCmap = $requireUnicodeCmap;
         $tt->read();
 
         return $tt;
+    }
+
+    /** Whether the font has a cmap subtable for this platform and encoding. */
+    public function hasCmap(int $platform, int $encoding): bool
+    {
+        return isset($this->subtables[$platform.','.$encoding]);
+    }
+
+    /**
+     * The glyph one cmap subtable gives a code: null when the font has no
+     * such subtable, 0 when the subtable does not map the code (or maps it
+     * past the last glyph, or is damaged).
+     */
+    public function cmapGlyph(int $platform, int $encoding, int $code): ?int
+    {
+        $key = $platform.','.$encoding;
+        if (! isset($this->subtables[$key])) {
+            return null;
+        }
+        $sub = $this->decoded[$key] ??= $this->decodeSubtable($this->subtables[$key]);
+        try {
+            $gid = match ($sub['format']) {
+                0 => $code >= 0 && $code < 256 ? ord($sub['data'][$code]) : 0,
+                6 => ($code >= $sub['data'][0] && $code < $sub['data'][0] + $sub['data'][1])
+                    ? $this->u16At($sub['data'][2] + 2 * ($code - $sub['data'][0])) : 0,
+                4 => $this->lookup4($sub['data'], $code),
+                12 => self::lookup12($sub['data'], $code),
+                default => 0,
+            };
+        } catch (FontException) {
+            return 0;
+        }
+
+        return $gid < $this->numGlyphs ? $gid : 0;
+    }
+
+    /** A glyph's left side bearing in font units (0 for a glyph that does not exist). */
+    public function leftSideBearing(int $gid): int
+    {
+        if ($gid < 0 || $gid >= $this->numGlyphs) {
+            return 0;
+        }
+        $hmtx = $this->tables['hmtx']['offset'];
+        $at = $gid < $this->numberOfHMetrics
+            ? $hmtx + 4 * $gid + 2
+            : $hmtx + 4 * $this->numberOfHMetrics + 2 * ($gid - $this->numberOfHMetrics);
+
+        return $this->s16At($at);
+    }
+
+    /** A glyph's raw `glyf` bytes ('' for an empty or missing glyph). */
+    public function glyphData(int $gid): string
+    {
+        [$s, $e] = $this->glyphRange($gid);
+
+        return $e > $s ? substr($this->data, $this->tables['glyf']['offset'] + $s, $e - $s) : '';
+    }
+
+    /** @return array{format: int, data: mixed} */
+    private function decodeSubtable(int $off): array
+    {
+        $end = $this->tables['cmap']['offset'] + $this->tables['cmap']['length'];
+        try {
+            $format = $this->u16At($off);
+
+            return match ($format) {
+                0 => $off + 262 <= $end ? ['format' => 0, 'data' => $this->bytesAt($off + 6, 256)] : ['format' => -1, 'data' => null],
+                6 => (function () use ($off, $end): array {
+                    $first = $this->u16At($off + 6);
+                    $count = $this->u16At($off + 8);
+
+                    return $off + 10 + 2 * $count <= $end
+                        ? ['format' => 6, 'data' => [$first, $count, $off + 10]]
+                        : ['format' => -1, 'data' => null];
+                })(),
+                4 => ['format' => 4, 'data' => $this->readFormat4($off, $end)],
+                12 => ['format' => 12, 'data' => $this->readFormat12($off, $end)],
+                default => ['format' => -1, 'data' => null],
+            };
+        } catch (FontException) {
+            return ['format' => -1, 'data' => null];
+        }
     }
 
     /** Whether the font's licence bits allow embedding it in a document. */
@@ -87,47 +182,63 @@ final class TrueType
     /** The glyph for a Unicode code point, or 0 (.notdef) when there is none. */
     public function glyphFor(int $cp): int
     {
-        if ($this->format12 !== []) {
-            $lo = 0;
-            $hi = count($this->format12) - 1;
-            while ($lo <= $hi) {
-                $mid = intdiv($lo + $hi, 2);
-                [$s, $e, $g] = $this->format12[$mid];
-                if ($cp < $s) {
-                    $hi = $mid - 1;
-                } elseif ($cp > $e) {
-                    $lo = $mid + 1;
-                } else {
-                    $gid = $g + ($cp - $s);
+        $gid = $this->format12 !== [] ? self::lookup12($this->format12, $cp) : $this->lookup4($this->format4, $cp);
 
-                    return $gid < $this->numGlyphs ? $gid : 0;
-                }
-            }
+        return $gid < $this->numGlyphs ? $gid : 0;
+    }
 
-            return 0;
-        }
-        if ($cp > 0xFFFF) {
-            return 0;
-        }
-        foreach ($this->format4 as [$start, $end, $delta, $rangePos]) {
-            if ($cp > $end) {
-                continue;
-            }
-            if ($cp < $start) {
-                return 0;
-            }
-            if ($rangePos === 0) {
-                $gid = ($cp + $delta) & 0xFFFF;
+    /** @param list<array{0: int, 1: int, 2: int}> $groups */
+    private static function lookup12(array $groups, int $cp): int
+    {
+        $lo = 0;
+        $hi = count($groups) - 1;
+        while ($lo <= $hi) {
+            $mid = intdiv($lo + $hi, 2);
+            [$s, $e, $g] = $groups[$mid];
+            if ($cp < $s) {
+                $hi = $mid - 1;
+            } elseif ($cp > $e) {
+                $lo = $mid + 1;
             } else {
-                $addr = $rangePos + 2 * ($cp - $start);
-                $g = $this->u16At($addr);
-                $gid = $g === 0 ? 0 : (($g + $delta) & 0xFFFF);
+                return $g + ($cp - $s);
             }
-
-            return $gid < $this->numGlyphs ? $gid : 0;
         }
 
         return 0;
+    }
+
+    /** @param list<array{0: int, 1: int, 2: int, 3: int}> $segments */
+    private function lookup4(array $segments, int $cp): int
+    {
+        if ($cp < 0 || $cp > 0xFFFF) {
+            return 0;
+        }
+        // Segments are sorted by end code: binary search for the first end >= cp.
+        $lo = 0;
+        $hi = count($segments) - 1;
+        $found = -1;
+        while ($lo <= $hi) {
+            $mid = intdiv($lo + $hi, 2);
+            if ($segments[$mid][1] >= $cp) {
+                $found = $mid;
+                $hi = $mid - 1;
+            } else {
+                $lo = $mid + 1;
+            }
+        }
+        if ($found < 0) {
+            return 0;
+        }
+        [$start, , $delta, $rangePos] = $segments[$found];
+        if ($cp < $start) {
+            return 0;
+        }
+        if ($rangePos === 0) {
+            return ($cp + $delta) & 0xFFFF;
+        }
+        $g = $this->u16At($rangePos + 2 * ($cp - $start));
+
+        return $g === 0 ? 0 : (($g + $delta) & 0xFFFF);
     }
 
     /** A glyph's advance width in font units. */
@@ -367,6 +478,7 @@ final class TrueType
                 continue;
             }
             $format = $this->u16At($off);
+            $this->subtables[$platform.','.$encoding] ??= $off;
             $unicode = $platform === 0 || ($platform === 3 && in_array($encoding, [1, 10], true));
             if (! $unicode) {
                 continue;
@@ -377,17 +489,25 @@ final class TrueType
                 $best4 ??= $off;
             }
         }
-        if ($best12 !== null) {
-            $this->readFormat12($best12, $end);
-        } elseif ($best4 !== null) {
-            $this->readFormat4($best4, $end);
-        } else {
-            throw new FontException('The font has no Unicode cmap (format 4 or 12).');
+        try {
+            if ($best12 !== null) {
+                $this->format12 = $this->readFormat12($best12, $end);
+            } elseif ($best4 !== null) {
+                $this->format4 = $this->readFormat4($best4, $end);
+            } elseif ($this->requireUnicodeCmap) {
+                throw new FontException('The font has no Unicode cmap (format 4 or 12).');
+            }
+        } catch (FontException $e) {
+            if ($this->requireUnicodeCmap) {
+                throw $e;
+            }
         }
     }
 
-    private function readFormat4(int $off, int $tableEnd): void
+    /** @return list<array{0: int, 1: int, 2: int, 3: int}> segments sorted by end code */
+    private function readFormat4(int $off, int $tableEnd): array
     {
+        $segments = [];
         $length = $this->u16At($off + 2);
         $end = min($tableEnd, $off + $length);
         $segX2 = $this->u16At($off + 6);
@@ -415,11 +535,15 @@ final class TrueType
                     continue;   // a range pointing outside the table maps nothing
                 }
             }
-            $this->format4[] = [$s, $e, $d, $pos];
+            $segments[] = [$s, $e, $d, $pos];
         }
+        usort($segments, fn (array $a, array $b) => $a[1] <=> $b[1]);
+
+        return $segments;
     }
 
-    private function readFormat12(int $off, int $tableEnd): void
+    /** @return list<array{0: int, 1: int, 2: int}> */
+    private function readFormat12(int $off, int $tableEnd): array
     {
         if ($off + 16 > $tableEnd) {
             throw new FontException('The font\'s cmap is truncated.');
@@ -439,7 +563,8 @@ final class TrueType
             $groups[] = [$s, $e, $this->u32At($g + 8)];
         }
         usort($groups, fn (array $a, array $b) => $a[0] <=> $b[0]);
-        $this->format12 = $groups;
+
+        return $groups;
     }
 
     /** @return array{0: int, 1: int} start and end of a glyph inside `glyf` */

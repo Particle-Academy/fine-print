@@ -42,9 +42,30 @@ $work = dirname(__DIR__).'/.out/oracle';
 const ORACLE_ZOOM_PER_SCALE = 75;
 const ORACLE_RENDER_SCALE = 2;
 
+// ONLY=name,name renders just those fixtures (the others' goldens are left alone).
+$only = getenv('ONLY') ? explode(',', (string) getenv('ONLY')) : null;
+$all = RenderFixtures::SCALES + RenderFixtures::TEXT_SCALES + RenderFixtures::LOCAL_SCALES;
+
 $jobs = [];
-foreach (RenderFixtures::SCALES as $name => $scales) {
-    file_put_contents("{$golden}/{$name}.pdf", RenderFixtures::pdf($name));
+foreach ($all as $name => $scales) {
+    if ($only !== null && ! in_array($name, $only, true)) {
+        continue;
+    }
+    if (isset(RenderFixtures::LOCAL_SCALES[$name])) {
+        // Built from a font installed here: the PDF stays in .out, only its hash is committed.
+        $pdf = RenderFixtures::localPdf($name);
+        if ($pdf === null) {
+            fwrite(STDERR, "{$name}: its font is not installed, skipped\n");
+
+            continue;
+        }
+        file_put_contents("{$work}/{$name}.pdf", $pdf);
+        file_put_contents("{$golden}/{$name}.pdf.sha256", hash('sha256', $pdf)."\n");
+        $pdfPath = realpath("{$work}/{$name}.pdf");
+    } else {
+        file_put_contents("{$golden}/{$name}.pdf", RenderFixtures::pdf($name));
+        $pdfPath = realpath("{$golden}/{$name}.pdf");
+    }
     [$w, $h] = RenderFixtures::displaySize($name);
     $cal = PdfBuilder::textPdf([
         sprintf("0 0 1 rg 10 %.3F m 10 %.3F l 40 %.3F l h f\n", 0.2 * $h, 0.8 * $h, 0.5 * $h)
@@ -59,7 +80,7 @@ foreach (RenderFixtures::SCALES as $name => $scales) {
             'scale' => $s,
             'render' => $render,
             'down' => intdiv($render, $s),
-            'pdf' => realpath("{$golden}/{$name}.pdf"),
+            'pdf' => $pdfPath,
             'cal' => realpath("{$work}/cal-{$name}.pdf"),
             'shot' => "{$work}/{$name}@{$s}x.full.png",
             'calShot' => "{$work}/cal-{$name}@{$s}x.full.png",

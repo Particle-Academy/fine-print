@@ -15,9 +15,10 @@ FPDF, TCPDF or dompdf, and no shelling out to a binary. Needing anything else
 is an approval request to the owner. It is never a `composer require`.
 
 P1 is the reader plus the security layer; P2 is the writer (`src/Writer`);
-P3a is the renderer core (`src/Render`: vector paths to PNG). Text, images,
-clipping and transparency in the renderer (P3b-d) and Laravel serving (P4) are
-later. See `.ai/plans/fine-print.md` in the envelope.
+P3a is the renderer core (`src/Render`: vector paths to PNG); P3b draws text
+from embedded TrueType fonts (`src/Render/Glyphs`). CFF / Type 1 / Type 3
+fonts, images, clipping and transparency in the renderer (P3b-d) and Laravel
+serving (P4) are later. See `.ai/plans/fine-print.md` in the envelope.
 
 | layer | where | trusts its input? |
 |---|---|---|
@@ -59,6 +60,40 @@ Renderer invariants:
 - **Stroke polygons are all emitted with one orientation.** Nonzero filling
   then unions them; mixed orientations would cancel where a join overlaps a
   segment.
+
+## Text (P3b)
+
+`Tf` → `Glyphs\RenderFont::load()` (once per font object per render; at most
+256 fonts / 64 MB of programs, then the cache starts over) → per show
+operator, `RenderFont::glyphs()` yields [gid, width, is-space] → each glyph's
+`Glyphs\TrueTypeGlyphs::outline()` (font units, cached) is mapped glyph →
+text (1/unitsPerEm) → `[Tfs*Th 0 0 Tfs 0 Ts] x Tm` → CTM, culled against
+the canvas, filled nonzero glyph by glyph, stroked through the P3a stroker.
+
+- **Reuse, don't duplicate.** The font program is read by P2's
+  `Writer\Fonts\TrueType` (`parse(..., requireUnicodeCmap: false)`,
+  `cmapGlyph()`, `glyphData()`, `leftSideBearing()`); widths, `/Differences`
+  and code splitting come from P1's `Text\Font` and `Text\CMap` (which now
+  also read `cidrange`/`cidchar`).
+- **Glyphs stream.** `glyphs()` and `Font::codes()` are generators. A show
+  string can hold millions of codes; building them into a list once took a
+  3-million-glyph `Tj` past PHP's memory limit (a fatal error). Never turn
+  them back into arrays. Every glyph ticks the render budget.
+- **Hinting is never executed.** Glyph instructions are skipped by length;
+  `fpgm`, `prep` and `cvt ` are not read. Outlines are drawn unhinted.
+- **Glyph limits** (`TrueTypeGlyphs::MAX_*`): 1024 contours, 16384 points
+  (composites multiplied out), 128 components, nesting 8, plus a self-
+  containment check. A glyph over a limit or malformed is a `FontException`,
+  counted as `text-glyph`, remembered (refused once, not re-parsed), and the
+  rest of the text is drawn.
+- **Placement follows FreeType**: the outline moves by `lsb - xMin` (phantom
+  point pp1) at the top level only. Measured in Chromium before it was
+  written.
+- **Font names in reports** are BaseFont stripped to `[A-Za-z0-9+_.-]`, at
+  most 63 characters, at most 16 per kind (`RenderFont::cleanName()`).
+- **Non-embedded fonts are not drawn** (`text-unembedded`, with the name).
+  No font is bundled. The standard 14 need outlines from somewhere, which is
+  a third-party question for the owner, not a code change.
 
 ## Encryption (owner ruling 2026-10-21: open empty-password files)
 
@@ -182,6 +217,20 @@ does a hostile file get out of this", never by which directory it is in.
 - **PDFium spaces zero-length dashes slightly apart** (`[0 12]` gives dots
   every 12.1 pt), so a long dotted line drifts against Chromium. Ours are at
   exact multiples, which is what the spec says.
+- **Chromium is a coarse oracle for TEXT** (measured 2026-10-21, Chromium
+  156). It snaps every glyph origin to a whole device pixel; its glyphs bleed
+  past their outlines (about 0.3 px right and top at its 2x, ~0 left and
+  bottom); and FreeType runs TrueType hinting, which moves a hinted font's
+  stems and baselines by up to half a pixel. Against it a 2x text golden
+  cannot see a one-pixel error. So: the `glyphs` golden keeps glyph origins
+  on half points (whole pixels at the oracle's 2x) and uses an unhinted
+  font, and exact placement is pinned by `TextRenderTest`'s pixel tests. Do
+  not "fix" our text to snap, bleed or hint to please Chromium without
+  deciding it is wanted. Turning off PDFium's Skia renderer changes nothing.
+- **A test file must run on its own.** Shared text helpers live in
+  `tests/Support/text-helpers.php` (loaded by `tests/Pest.php`). When they
+  lived in `TextRenderTest.php`, `TextHostileTest` passed in the full suite
+  and errored alone, and three sabotage runs read that error as "red".
 
 ## Tests
 
@@ -202,4 +251,14 @@ absolute error and share of pixels off by more than 64, a 2 px frame
 excluded); `tests/Support/PngReader` is a PNG decoder written separately from
 our encoder. Numbers and diff images land in `tests/.out/`. To regenerate,
 run the three scripts in `tests/oracle/` (Chromium + playwright-core are a
-TEST ORACLE on the developer's machine, never a dependency).
+TEST ORACLE on the developer's machine, never a dependency); `ONLY=a,b`
+limits `build.php` to some fixtures so the others' goldens are untouched.
+
+Text goldens: `glyphs` (written by `RenderFixtures`, snap-immune, strict
+bounds) and `p2-text` (written by the P2 writer) embed
+`FontBuilder::outlined()`, a font drawn in our own code. `p2-dejavu` is in
+the `local` group: it is built at test time from the machine's
+`DejaVuSans.ttf`, so **no font byte is committed**, only Chromium's PNG and
+the PDF's SHA-256 (`p2-dejavu.pdf.sha256`); a different font version skips.
+The text bounds were revised after the first run; `GoldenTest` says why, and
+its "wrong on purpose" controls must keep failing.

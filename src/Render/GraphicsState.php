@@ -47,6 +47,29 @@ final class GraphicsState
 
     public bool $maskOrBlend = false;
 
+    // --- text state (ISO 32000-1 9.3), saved by q like the rest ------------
+
+    /** The current font, or null when none is set or the resource is missing. */
+    public ?Glyphs\RenderFont $font = null;
+
+    /** A Tf was given but its resource could not be found. */
+    public bool $fontMissing = false;
+
+    public float $fontSize = 0.0;
+
+    public float $charSpacing = 0.0;
+
+    public float $wordSpacing = 0.0;
+
+    /** Tz / 100. */
+    public float $hScale = 1.0;
+
+    public float $leading = 0.0;
+
+    public int $textRender = 0;
+
+    public float $rise = 0.0;
+
     public function __construct()
     {
         $this->fillSpace = ColourSpace::gray();

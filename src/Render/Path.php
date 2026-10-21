@@ -99,6 +99,60 @@ final class Path
         return true;
     }
 
+    /**
+     * A path from glyph-outline subpaths (see {@see Glyphs\Outline}), mapped
+     * through matrix $m: what a stroked glyph needs, in user space.
+     *
+     * @param  list<array{xy: list<float>, seg: string, closed: bool}>  $subpaths
+     * @param  list<float>  $m
+     */
+    public static function fromSubpaths(array $subpaths, array $m): self
+    {
+        $p = new self();
+        foreach ($subpaths as $sp) {
+            $p->subpaths[] = ['xy' => self::map($sp['xy'], $m), 'seg' => $sp['seg'], 'closed' => $sp['closed']];
+        }
+
+        return $p;
+    }
+
+    /**
+     * Glyph-outline subpaths mapped straight to device space and flattened:
+     * what a filled glyph needs, without building a Path.
+     *
+     * @param  list<array{xy: list<float>, seg: string, closed: bool}>  $subpaths
+     * @param  list<float>  $m
+     * @return list<list<float>>
+     */
+    public static function flattenSubpaths(array $subpaths, array $m, float $tol): array
+    {
+        $out = [];
+        foreach ($subpaths as $sp) {
+            $out[] = self::flatten(self::map($sp['xy'], $m), $sp['seg'], $tol);
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param  list<float>  $xy
+     * @param  list<float>  $m
+     * @return list<float>
+     */
+    private static function map(array $xy, array $m): array
+    {
+        [$a, $b, $c, $d, $e, $f] = $m;
+        $out = [];
+        for ($i = 0, $n = count($xy); $i < $n; $i += 2) {
+            $x = $xy[$i];
+            $y = $xy[$i + 1];
+            $out[] = $x * $a + $y * $c + $e;
+            $out[] = $x * $b + $y * $d + $f;
+        }
+
+        return $out;
+    }
+
     /** A segment straight after `h` starts a new subpath at the closed one's start. */
     private function ensureOpen(): bool
     {

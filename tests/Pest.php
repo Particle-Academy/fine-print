@@ -98,3 +98,5 @@ function fpwSentence(int $i): string
 {
     return "Sentence {$i} carries words alpha{$i} beta{$i} gamma{$i} delta{$i} and ends here.";
 }
+
+require_once __DIR__.'/Support/text-helpers.php';

@@ -134,8 +134,31 @@ BREAKING and says what a consumer must do.
   absolute error 0.001 to 1.19 per channel (of 255), at most 0.64% of pixels
   off by more than 64. A 17th, CMYK, matches in shape but not colour, because
   PDFium converts CMYK through a press profile.
+- **Text in embedded TrueType fonts is drawn** (P3b): glyph outlines read
+  from the font program in the file (`glyf`, `loca`, `hmtx`; composite
+  glyphs by offset, scale, 2x2 matrix and point matching; quadratic curves
+  raised to exact cubics; the nonzero fill), for simple TrueType fonts
+  (glyphs chosen through the encoding, `/Differences` and the (3,1), (3,0) or
+  (1,0) cmap, as ISO 32000-1 9.6.6.4 says) and Type0 fonts over CIDFontType2
+  (Identity-H or an embedded CMap with `cidrange`/`cidchar`, and a
+  CIDToGIDMap). The full text state: `BT`/`ET`, `Tf`, `Td`/`TD`/`Tm`/`T*`,
+  `Tc`, `Tw` (single-byte code 32 only), `Tz`, `TL`, `Ts`, `Tj`/`TJ`/`'`/`"`,
+  through the text matrix and the CTM. Render modes 0-3 (fill, stroke, fill
+  then stroke, invisible); modes 4-6 paint and report their clip as `clip`,
+  mode 7 paints nothing and reports `clip`. Hinting instructions are never
+  executed. Compared against Chromium on 6 new goldens (3 fixtures at 1x and
+  2x; the DejaVu one is local-only and commits no font bytes); see the plan
+  for the numbers and for why the text bounds are wider than the vector ones.
+- **Hostile fonts are bounded**: at most 1024 contours, 16384 points
+  (composites multiplied out), 128 components and 8 levels of nesting per
+  glyph, a composite that contains itself is refused, instructions and
+  coordinates that run past the glyph are refused, and every glyph ticks the
+  render budget. A bad glyph is skipped and counted (`text-glyph`); a font
+  that cannot be read is `text-font-invalid`. Show strings are streamed, so a
+  multi-million-glyph `Tj` costs time (refused by `renderTimeSeconds`), never
+  memory.
 - **What the renderer does NOT draw yet is reported, never hidden**:
-  `skipped` lists text, images, inline images, clipping, shadings, patterns,
+  `skipped` lists text it cannot draw (by kind and font name, below), images, inline images, clipping, shadings, patterns,
   transparency (drawn opaque), Separation/DeviceN colour (drawn as grey),
   annotation appearances, optional-content visibility and forms past the depth
   limit, with counts. `complete()` is false when anything is listed.
@@ -167,6 +190,20 @@ BREAKING and says what a consumer must do.
   consumer matching the existing reasons needs to do nothing.
 - Inline-image skipping moved into `Parser\InlineImage`, shared by the text
   extractor and the renderer. No behaviour change.
+- The renderer's `skipped` kind `text` (never released) is replaced by kinds
+  that say WHY text was not drawn: `text-unembedded` (no font program in the
+  file, which includes the standard 14 such as Helvetica: no outlines are
+  bundled), `text-cff`, `text-type1`, `text-type3`, `text-vertical`,
+  `text-cmap`, `text-font-invalid` and `text-glyph`. These entries also carry
+  `fonts`, the BaseFont names concerned (PostScript characters only, at most
+  16). `Rendering::KINDS` lists them.
+- `Writer\Fonts\TrueType::parse()` takes `requireUnicodeCmap` (default true,
+  so the writer is unchanged) and gains `cmapGlyph()`, `hasCmap()`,
+  `glyphData()` and `leftSideBearing()` for the renderer; format 4 lookups
+  are a binary search. `Text\CMap` reads `cidrange`/`cidchar` and streams
+  codes (`each()`); `Text\Font` exposes `codes()`, `explicitWidth()`,
+  `defaultWidth()`, `encodingUnicode()` and `hasEncoding()`. Text extraction
+  is unchanged.
 
 ### Fixed
 

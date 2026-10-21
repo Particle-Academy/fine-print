@@ -38,6 +38,8 @@ final class Font
 
     private float $widthScale = 1.0;
 
+    private bool $hasEncoding = false;
+
     public static function fromDict(PdfDict $dict, Document $doc): self
     {
         $f = new self();
@@ -65,11 +67,7 @@ final class Font
     {
         $out = [];
         if ($this->composite) {
-            $cmap = $this->encodingCMap ?? $this->toUnicode;
-            $codes = $cmap !== null && $cmap->hasCodespace()
-                ? $cmap->split($bytes, 2)
-                : str_split($bytes, 2);
-            foreach ($codes as $code) {
+            foreach ($this->split($bytes) as $code) {
                 if ($code === '') {
                     continue;
                 }
@@ -95,6 +93,91 @@ final class Font
         }
 
         return $out;
+    }
+
+    // --- for the renderer (P3b): the same font data, without guessing ---------
+
+    public function composite(): bool
+    {
+        return $this->composite;
+    }
+
+    /**
+     * A show string cut into character codes: one byte each for a simple
+     * font; per the encoding CMap's codespace (else two bytes) for Type0.
+     *
+     * @return list<string>
+     */
+    public function split(string $bytes): array
+    {
+        if (! $this->composite) {
+            return $bytes === '' ? [] : str_split($bytes);
+        }
+        $cmap = $this->encodingCMap ?? $this->toUnicode;
+        $codes = $cmap !== null && $cmap->hasCodespace() ? $cmap->split($bytes, 2) : str_split($bytes, 2);
+
+        return array_values(array_filter($codes, fn (string $c) => $c !== ''));
+    }
+
+    /**
+     * As {@see split()}, one code at a time (the renderer streams: a show
+     * string can hold millions of codes).
+     *
+     * @return \Generator<int, string>
+     */
+    public function codes(string $bytes): \Generator
+    {
+        $len = strlen($bytes);
+        if (! $this->composite) {
+            for ($i = 0; $i < $len; $i++) {
+                yield $bytes[$i];
+            }
+
+            return;
+        }
+        $cmap = $this->encodingCMap ?? $this->toUnicode;
+        if ($cmap !== null && $cmap->hasCodespace()) {
+            yield from $cmap->each($bytes, 2);
+
+            return;
+        }
+        for ($i = 0; $i < $len; $i += 2) {
+            yield substr($bytes, $i, 2);
+        }
+    }
+
+    /** The embedded encoding CMap of a Type0 font, if it has one. */
+    public function encodingCMap(): ?CMap
+    {
+        return $this->encodingCMap;
+    }
+
+    /**
+     * The width the PDF gives a code (simple font) or CID (Type0), in 1/1000
+     * text space, or null when it gives none: the renderer then asks the font
+     * program, where the extractor guesses.
+     */
+    public function explicitWidth(int $key): ?float
+    {
+        return isset($this->widths[$key]) ? $this->widths[$key] * $this->widthScale : null;
+    }
+
+    /** /DW of a Type0 font (1000 when absent); /MissingWidth (or 500) of a simple one. */
+    public function defaultWidth(): float
+    {
+        return $this->defaultWidth * $this->widthScale;
+    }
+
+    /** A simple font's code through its encoding (base encoding + /Differences) as UTF-8, or null. */
+    public function encodingUnicode(int $code): ?string
+    {
+        return $this->encoding[$code] ?? null;
+    }
+
+    /** Whether the font dictionary names an /Encoding at all. */
+    public function hasEncoding(): bool
+    {
+        return $this->hasEncoding;
     }
 
     private function loadComposite(PdfDict $dict, Document $doc): void
@@ -189,6 +272,7 @@ final class Font
         $enc = $doc->resolve($dict->get('Encoding'));
         $baseName = $symbolic ? null : ($subtype === 'TrueType' ? 'WinAnsiEncoding' : 'StandardEncoding');
         $differences = null;
+        $this->hasEncoding = $enc instanceof PdfName || $enc instanceof PdfDict;
         if ($enc instanceof PdfName) {
             $baseName = $enc->value;
         } elseif ($enc instanceof PdfDict) {

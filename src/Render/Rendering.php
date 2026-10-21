@@ -23,21 +23,37 @@ namespace FinePrint\Render;
  * | `optional-content` | optional-content sections, drawn regardless of their visibility |
  * | `pattern` | paint with a pattern (not drawn) |
  * | `shading` | `sh` shadings |
- * | `text` | text-showing operators |
+ * | `text-cff` | text in an embedded CFF font (Type1C, CIDFontType0C, OpenType CFF) |
+ * | `text-cmap` | text in a Type0 font whose CMap is predefined (other than Identity-H) or maps no CIDs |
+ * | `text-font-invalid` | text with no font set, a font resource that is missing, or a font program that cannot be read |
+ * | `text-glyph` | glyphs whose outline is malformed or over a limit (per glyph; the rest of the text is drawn) |
+ * | `text-type1` | text in an embedded Type 1 font |
+ * | `text-type3` | text in a Type 3 font |
+ * | `text-unembedded` | text in a font with no program in the file (the standard 14 among them) |
+ * | `text-vertical` | vertical text (Identity-V, WMode 1) |
  * | `transparency` | paint under constant alpha, a soft mask or a blend mode (drawn opaque) |
  *
- * Counts are per operator (or per annotation): `text: 12` is twelve show
- * operators, not twelve characters.
+ * Counts are per operator (or per annotation): `text-unembedded: 12` is
+ * twelve show operators, not twelve characters. `text-glyph` counts glyphs.
+ * The `text-*` kinds also carry `fonts`: the fonts concerned (at most 16),
+ * by BaseFont name stripped to PostScript name characters.
+ *
+ * Text in clipping render modes 4-6 is painted and its clip counted under
+ * `clip`; mode 7 paints nothing and counts `clip`. Mode 3 (invisible) is
+ * drawn correctly by drawing nothing, and is not a skip.
  */
 final class Rendering
 {
     public const KINDS = [
         'annotation', 'clip', 'colorspace', 'form-depth', 'image', 'inline-image',
-        'optional-content', 'pattern', 'shading', 'text', 'transparency',
+        'optional-content', 'pattern', 'shading',
+        'text-cff', 'text-cmap', 'text-font-invalid', 'text-glyph', 'text-type1', 'text-type3',
+        'text-unembedded', 'text-vertical',
+        'transparency',
     ];
 
     /**
-     * @param  list<array{kind: string, count: int}>  $skipped
+     * @param  list<array{kind: string, count: int, fonts?: list<string>}>  $skipped
      * @param  list<string>  $warnings
      */
     public function __construct(

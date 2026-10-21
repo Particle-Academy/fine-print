@@ -29,6 +29,12 @@ final class CMap
     /** @var list<array{len: int, lo: int, hi: int, dst: string|list<string>}> */
     private array $ranges = [];
 
+    /** @var array<string, int> raw code bytes => CID (encoding CMaps) */
+    private array $cidChars = [];
+
+    /** @var list<array{len: int, lo: int, hi: int, cid: int}> */
+    private array $cidRanges = [];
+
     public function __construct(string $source, int $maxEntries = 100_000)
     {
         $p = new Parser($source, refs: false);
@@ -67,6 +73,23 @@ final class CMap
                         }
 
                         break;
+                    case 'endcidchar':
+                        for ($i = 0; $i + 1 < count($operands) && $entries < $maxEntries; $i += 2, $entries++) {
+                            if ($operands[$i] instanceof PdfString && is_int($operands[$i + 1]) && $operands[$i + 1] >= 0) {
+                                $this->cidChars[$operands[$i]->bytes] = $operands[$i + 1];
+                            }
+                        }
+
+                        break;
+                    case 'endcidrange':
+                        for ($i = 0; $i + 2 < count($operands) && $entries < $maxEntries; $i += 3, $entries++) {
+                            [$lo, $hi, $dst] = [$operands[$i], $operands[$i + 1], $operands[$i + 2]];
+                            if ($lo instanceof PdfString && $hi instanceof PdfString && is_int($dst) && $dst >= 0) {
+                                $this->cidRanges[] = ['len' => strlen($lo->bytes), 'lo' => self::int($lo->bytes), 'hi' => self::int($hi->bytes), 'cid' => $dst];
+                            }
+                        }
+
+                        break;
                     case 'endbfrange':
                         for ($i = 0; $i + 2 < count($operands) && $entries < $maxEntries; $i += 3, $entries++) {
                             [$lo, $hi, $dst] = [$operands[$i], $operands[$i + 1], $operands[$i + 2]];
@@ -95,6 +118,29 @@ final class CMap
     public function hasCodespace(): bool
     {
         return $this->codespace !== [];
+    }
+
+    /** Whether this is an encoding CMap (it maps codes to CIDs). */
+    public function hasCids(): bool
+    {
+        return $this->cidChars !== [] || $this->cidRanges !== [];
+    }
+
+    /** The CID for one code of an encoding CMap (cidchar, then cidrange), or null. */
+    public function cid(string $code): ?int
+    {
+        if (isset($this->cidChars[$code])) {
+            return $this->cidChars[$code];
+        }
+        $len = strlen($code);
+        $v = self::int($code);
+        foreach ($this->cidRanges as $r) {
+            if ($r['len'] === $len && $v >= $r['lo'] && $v <= $r['hi']) {
+                return $r['cid'] + ($v - $r['lo']);
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -127,6 +173,36 @@ final class CMap
         }
 
         return $codes;
+    }
+
+    /**
+     * As {@see split()}, one code at a time: a show string can be megabytes,
+     * and the renderer must not hold a list of every code in it.
+     *
+     * @return \Generator<int, string>
+     */
+    public function each(string $bytes, int $fallbackLength): \Generator
+    {
+        $len = strlen($bytes);
+        $i = 0;
+        while ($i < $len) {
+            $take = 0;
+            foreach ($this->codespace as $cs) {
+                if ($i + $cs['len'] <= $len) {
+                    $v = self::int(substr($bytes, $i, $cs['len']));
+                    if ($v >= $cs['lo'] && $v <= $cs['hi']) {
+                        $take = $cs['len'];
+
+                        break;
+                    }
+                }
+            }
+            if ($take === 0) {
+                $take = min($fallbackLength, $len - $i);
+            }
+            yield substr($bytes, $i, $take);
+            $i += $take;
+        }
     }
 
     /** The UTF-8 for one code, or null when the CMap does not map it. */

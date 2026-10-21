@@ -22,9 +22,11 @@ use InvalidArgumentException;
  * page shown is the CropBox (cut to the MediaBox), turned by /Rotate, on a
  * white background, as viewers show it.
  *
- * P3a draws vector paths: fills, strokes, dashes, colour, transforms and form
- * XObjects. Text, images, clipping, shading, patterns and transparency are
- * NOT drawn yet and are listed in {@see Rendering::$skipped}.
+ * Drawn: vector paths (fills, strokes, dashes, colour, transforms, form
+ * XObjects) and text in embedded TrueType fonts (P3b). NOT drawn yet, and
+ * listed in {@see Rendering::$skipped}: text in fonts that are not embedded
+ * or are CFF / Type 1 / Type 3, images, clipping, shading, patterns and
+ * transparency.
  *
  * Bounded by {@see Limits}: the raster's pixel count is judged before it is
  * allocated (`maxRenderPixels`), every operator counts (`maxOperators`), forms
@@ -131,9 +133,14 @@ final class Renderer
 
         $skipped = $interp->skipped();
         ksort($skipped);
+        $fonts = $interp->skippedFonts();
         $list = [];
         foreach ($skipped as $kind => $count) {
-            $list[] = ['kind' => $kind, 'count' => $count];
+            $entry = ['kind' => $kind, 'count' => $count];
+            if (isset($fonts[$kind])) {
+                $entry['fonts'] = $fonts[$kind];
+            }
+            $list[] = $entry;
         }
 
         return new Rendering($raster, $number, $scale, $rotate, $list, $doc->warnings(), $interp->operators(), $w, $h);

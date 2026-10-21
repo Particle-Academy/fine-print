@@ -135,9 +135,125 @@ final class RenderFixtures
         ];
     }
 
+    /**
+     * Text goldens (P3b). `glyphs` is written here with glyph origins on
+     * half points (whole pixels at the oracle's 2x), because PDFium snaps
+     * every glyph origin to a whole device pixel (measured 2026-10-21): with
+     * origins already on the grid the comparison is of outlines. `p2-text`
+     * is written by the P2 writer, so its origins fall where layout puts
+     * them and the snapping shows; it is held to the looser TEXT tolerance.
+     */
+    public const TEXT_SCALES = [
+        'glyphs' => [1, 2],
+        'p2-text' => [1, 2],
+    ];
+
+    /** Snap-immune fixtures, held to the strict tolerance. */
+    public const SNAP_IMMUNE = ['glyphs'];
+
+    /**
+     * Text goldens built from a font installed on THIS machine (the `local`
+     * group). The PDF is built at test time and never committed, so no font
+     * byte ships; only Chromium's PNG of it and the PDF's SHA-256 are kept.
+     */
+    public const LOCAL_SCALES = [
+        'p2-dejavu' => [1, 2],
+    ];
+
+    public const DEJAVU = 'C:/Windows/Fonts/DejaVuSans.ttf';
+
+    /** A local fixture's PDF, or null when its font is not installed. */
+    public static function localPdf(string $name): ?string
+    {
+        if ($name !== 'p2-dejavu' || ! is_file(self::DEJAVU)) {
+            return null;
+        }
+        $body = 'The renderer draws this page from the outlines of an embedded TrueType font, glyph by glyph, '
+            .'with nothing but PHP. Each word is placed by the writer and each glyph is filled by exact coverage. '
+            .'Quick brown foxes jump over lazy dogs; sphinx of black quartz, judge my vow. 0123456789 (and) [some] {marks}: '
+            .'"quotes", apostrophes\' and dashes - all of them; Greek αβγδ and Cyrillic жизнь. ';
+        $blocks = [
+            ['type' => 'heading', 'level' => 1, 'runs' => [['text' => 'Rendering embedded text', 'font' => 'DejaVu Sans']]],
+        ];
+        for ($i = 0; $i < 7; $i++) {
+            $blocks[] = ['type' => 'paragraph', 'runs' => [['text' => $body, 'font' => 'DejaVu Sans', 'size' => $i % 2 === 0 ? 10 : 9]]];
+        }
+        $blocks[] = ['type' => 'paragraph', 'runs' => [['text' => 'Large: Rag 36', 'font' => 'DejaVu Sans', 'size' => 36, 'bold' => false]]];
+
+        return \FinePrint\Agent::toBytes(['blocks' => $blocks], ['fonts' => ['DejaVu Sans' => self::DEJAVU]]);
+    }
+
+    /** The text fixtures' PDF bytes. */
+    public static function textPdf(string $name): string
+    {
+        if ($name === 'p2-text') {
+            $line = 'DOS AD xo ÄÉ ZQ WIW OD SAD ox Ä ZQ DOS ';
+            $blocks = [
+                ['type' => 'heading', 'level' => 1, 'runs' => [['text' => 'DOS ÄÉ ZQ', 'font' => 'Fp', 'size' => 30]]],
+                ['type' => 'paragraph', 'runs' => [['text' => str_repeat($line, 3), 'font' => 'Fp', 'size' => 10]]],
+                ['type' => 'paragraph', 'align' => 'justify', 'runs' => [['text' => str_repeat($line, 4), 'font' => 'Fp', 'size' => 12]]],
+                ['type' => 'paragraph', 'runs' => [
+                    ['text' => 'OD AD ', 'font' => 'Fp', 'size' => 20, 'color' => '#B00020'],
+                    ['text' => 'ZQ xo', 'font' => 'Fp', 'size' => 20, 'color' => '#1A4FA0'],
+                ]],
+            ];
+
+            return \FinePrint\Agent::toBytes(['blocks' => $blocks], ['fonts' => ['Fp' => FontBuilder::outlined()]]);
+        }
+
+        // 'glyphs': written here, origins on half points.
+        $outlined = FontBuilder::outlined();
+        $square = FontBuilder::make();
+        $b = new PdfBuilder();
+        $cat = $b->reserve();
+        $tree = $b->reserve();
+        $simple = function (string $program, string $name, string $extra) use ($b): int {
+            $ff = $b->stream($program, '/Length1 '.strlen($program));
+            $d = $b->object('<< /Type /FontDescriptor /FontName /'.$name.' /Flags 32 /FontBBox [-200 -300 1200 1000] /ItalicAngle 0 /Ascent 800 /Descent -200 /CapHeight 700 /StemV 80 /FontFile2 '.$ff.' 0 R >>');
+
+            return $b->object('<< /Type /Font /Subtype /TrueType /BaseFont /'.$name.' /Encoding /WinAnsiEncoding /FontDescriptor '.$d.' 0 R '.$extra.' >>');
+        };
+        $s = $simple($outlined, 'FpOutline-Regular', '/FirstChar 32 /LastChar 201 /Widths ['.self::widths().']');
+        $q = $simple($square, 'FpTest-Regular', '');
+        $ff = $b->stream($outlined, '/Length1 '.strlen($outlined));
+        $d = $b->object('<< /Type /FontDescriptor /FontName /FpOutline-Regular /Flags 4 /FontBBox [-200 -300 1200 1000] /ItalicAngle 0 /Ascent 800 /Descent -200 /CapHeight 700 /StemV 80 /FontFile2 '.$ff.' 0 R >>');
+        $cid = $b->object('<< /Type /Font /Subtype /CIDFontType2 /BaseFont /FpOutline-Regular /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor '.$d.' 0 R /DW 1000 /W [9 [700 700 750 700]] /CIDToGIDMap /Identity >>');
+        $c = $b->object('<< /Type /Font /Subtype /Type0 /BaseFont /FpOutline-Regular /Encoding /Identity-H /DescendantFonts ['.$cid.' 0 R] >>');
+        $content = "BT /S 20 Tf 10 170 Td (DOSAo) Tj ET\n"
+            ."BT /C 20 Tf 10 140 Td <0009000A000B000C> Tj ET\n"
+            ."BT /S 20 Tf 1 0 0.3 1 120 140 Tm (A) Tj ET\n"
+            ."0.8 0 0 rg 0 0 0.7 RG 1 w BT /S 30 Tf 10 105 Td 2 Tr (OD) Tj 1 Tr (A) Tj 0 Tr ET\n"
+            ."0 g BT /S 20 Tf 50 Tz 2 Tc 110 105 Td (xWx) Tj ET\n"
+            ."0 0.5 0 rg BT /S 20 Tf 0 1 -1 0 190 20 Tm (DOS) Tj ET\n"
+            ."0 g BT /S 20 Tf 10 70 Td [(I) -500 (W) 250 (I)] TJ 5 Ts (o) Tj ET\n"
+            ."BT /Q 50 Tf 10 8 Td (HIW) Tj ET\n";
+        $cs = $b->stream($content);
+        $page = $b->object('<< /Type /Page /Parent '.$tree.' 0 R /Contents '.$cs.' 0 R /Resources << /Font << /S '.$s.' 0 R /C '.$c.' 0 R /Q '.$q.' 0 R >> >> >>');
+        $b->object('<< /Type /Pages /Kids ['.$page.' 0 R] /Count 1 /MediaBox [0 0 200 200] >>', $tree);
+        $b->object('<< /Type /Catalog /Pages '.$tree.' 0 R >>', $cat);
+
+        return $b->build();
+    }
+
+    /** /Widths for FontBuilder::outlined() from code 32 to 201 (WinAnsi), 0 where unmapped. */
+    private static function widths(): string
+    {
+        $adv = [0x20 => 250, 0x4F => 700, 0x44 => 700, 0x41 => 700, 0x53 => 600, 0x6F => 500, 0x78 => 600,
+            0xC4 => 700, 0xC9 => 700, 0x5A => 750, 0x51 => 700, 0x49 => 500, 0x57 => 900];
+        $out = [];
+        for ($c = 32; $c <= 201; $c++) {
+            $out[] = $adv[$c] ?? 0;
+        }
+
+        return implode(' ', $out);
+    }
+
     /** The fixture's PDF bytes. */
     public static function pdf(string $name): string
     {
+        if (isset(self::TEXT_SCALES[$name])) {
+            return self::textPdf($name);
+        }
         $f = self::all()[$name];
         $b = PdfBuilder::textPdf([$f['content']], [
             'mediaBox' => $f['mediaBox'],
@@ -154,6 +270,12 @@ final class RenderFixtures
     /** Displayed size in points (after /Rotate and the CropBox). @return array{0: float, 1: float} */
     public static function displaySize(string $name): array
     {
+        if ($name === 'glyphs') {
+            return [200.0, 200.0];
+        }
+        if (isset(self::TEXT_SCALES[$name]) || isset(self::LOCAL_SCALES[$name])) {
+            return [612.0, 792.0];
+        }
         $f = self::all()[$name];
         $box = $f['mediaBox'];
         if (preg_match('/CropBox \[([^\]]+)\]/', $f['page'] ?? '', $m)) {

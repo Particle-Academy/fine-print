@@ -341,10 +341,10 @@ it('draws nested forms', function () {
 
 // --- the skipped report ---------------------------------------------------------
 
-it('skips text and says so', function () {
+it('skips text in a font with no embedded program and says so', function () {
     $r = fpRender(fprPage(PdfBuilder::line('Hello', 10, 50).PdfBuilder::line('again', 10, 30).'BT /F1 9 Tf [(a) 5 (b)] TJ (c) \' ET'));
 
-    expect(fpSkipped($r))->toBe(['text' => 4])
+    expect(fpSkipped($r))->toBe(['text-unembedded' => 4])
         ->and($r->complete())->toBeFalse();
 });
 
@@ -416,7 +416,7 @@ it('anti-aliases a diagonal edge', function () {
     expect($p[0])->toBeGreaterThan(100)->toBeLessThan(156);
 });
 
-it('renders what the P2 writer makes without failing, text reported as skipped', function () {
+it('renders what the P2 writer makes without failing, standard-font text reported as skipped', function () {
     $pdf = fpwWrite(['blocks' => [
         ['type' => 'heading', 'level' => 1, 'runs' => [['text' => 'Title']]],
         fpwPara('Body text.'),
@@ -425,5 +425,5 @@ it('renders what the P2 writer makes without failing, text reported as skipped',
     $r = Renderer::render($pdf, 1, 1.0);
 
     expect($r->width)->toBe(612)
-        ->and(fpSkipped($r))->toHaveKey('text');
+        ->and(fpSkipped($r))->toHaveKey('text-unembedded');
 });

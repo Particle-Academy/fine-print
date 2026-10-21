@@ -18,6 +18,9 @@ use InvalidArgumentException;
  * - `inkMismatch`: the share of pixels where one image has ink (any channel
  *   below 250) and the other does not. Colour-blind on purpose: it measures
  *   GEOMETRY, for pages whose colours are expected to differ (CMYK).
+ * - `inkedMismatch`: of the pixels where either image has ink, the share off
+ *   by more than `threshold`. A text page is mostly white, so the page-wide
+ *   share can look small for text that is visibly wrong; this cannot.
  *
  * A `border` band is excluded: Chromium's PDF viewer draws its page frame
  * over the outermost pixel or two of the page, so those are not the page.
@@ -37,6 +40,9 @@ final class ImageDiff
         $sum = 0;
         $bad = 0;
         $ink = 0;
+        $inked = 0;
+        $inkBad = 0;
+        $sameInk = 0;
         $max = 0;
         $pixels = 0;
         $diff = [];
@@ -54,6 +60,12 @@ final class ImageDiff
             $rb = $b[$y];
             if ($ra === $rb) {
                 $pixels += $width - 2 * $border;
+                for ($x = $border; $x < $width - $border; $x++) {
+                    $i = $x * 3;
+                    if (min(ord($ra[$i]), ord($ra[$i + 1]), ord($ra[$i + 2])) < 250) {
+                        $sameInk++;
+                    }
+                }
                 $diff[] = $drow;
 
                 continue;
@@ -74,6 +86,12 @@ final class ImageDiff
                 if ($inkA !== $inkB) {
                     $ink++;
                 }
+                if ($inkA || $inkB) {
+                    $inked++;
+                    if ($m > $threshold) {
+                        $inkBad++;
+                    }
+                }
                 $pixels++;
                 // Diff image: white where equal, darker red the larger the difference.
                 $v = 255 - min(255, $m * 2);
@@ -89,6 +107,7 @@ final class ImageDiff
             'mismatch' => $pixels > 0 ? $bad / $pixels : 0.0,
             'max' => $max,
             'inkMismatch' => $pixels > 0 ? $ink / $pixels : 0.0,
+            'inkedMismatch' => ($inked + $sameInk) > 0 ? $inkBad / ($inked + $sameInk) : 0.0,
             'pixels' => $pixels,
             'diff' => $diff,
         ];

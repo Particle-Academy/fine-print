@@ -14,10 +14,10 @@ active content into them.
 no third-party PDF library. Just PHP 8.4 and its bundled `zlib`, `mbstring`,
 `ctype` and `json`.
 
-> **Status: 0.x, reader and writer, plus the first step of a page renderer.**
-> The renderer draws vector paths only so far (see [Rendering pages](#rendering-pages));
-> text, images and clipping are later steps, and Laravel page-image serving is a
-> later phase. Pre-1.0, breaking changes may land in a minor release; the
+> **Status: 0.x, reader and writer, plus the first steps of a page renderer.**
+> The renderer draws vector paths and text in embedded TrueType fonts so far
+> (see [Rendering pages](#rendering-pages)); other font types, images and
+> clipping are later steps, and Laravel page-image serving is a later phase. Pre-1.0, breaking changes may land in a minor release; the
 > [changelog](CHANGELOG.md) marks each one.
 
 ## Why
@@ -315,7 +315,7 @@ $r = Renderer::render($pdfBytes, 1, 2.0);
 $r->width; $r->height;      // pixels
 $r->png();                  // RGB PNG bytes
 $r->complete();             // false when anything on the page was NOT drawn
-$r->skipped;                // [['kind' => 'text', 'count' => 12], ...]
+$r->skipped;                // [['kind' => 'text-unembedded', 'count' => 12, 'fonts' => ['Helvetica']], ...]
 ```
 
 `scale` is pixels per point: 1.0 is 72 DPI. The page shown is the CropBox (cut
@@ -329,11 +329,26 @@ the simple formula, so it differs from a press profile), ICC-based, CalGray
 and CalRGB colour by their channel count; `cm` transforms, `q`/`Q`, line
 settings from ExtGState, and form XObjects.
 
-**What is NOT drawn yet, and is listed in `skipped`:** text, images and inline
-images, clipping, shadings, patterns, transparency (drawn opaque), Separation
-and DeviceN colour (drawn as grey), annotation appearances, and optional-content
-visibility (everything is drawn). Check `complete()` before treating a render
-as the whole page.
+**Text** in fonts whose TrueType program is embedded in the file: simple
+TrueType fonts (glyphs chosen through the encoding, `/Differences` and the
+font's (3,1), (3,0) or (1,0) cmap) and Type0 fonts over CIDFontType2
+(Identity-H or an embedded CMap, with a CIDToGIDMap). All text state: `Tc`,
+`Tw`, `Tz`, `TL`, `Ts`, `Td`/`TD`/`Tm`/`T*`, `Tj`/`TJ`/`'`/`"`, through the
+text matrix and the CTM. Render modes fill, stroke, fill and stroke, and
+invisible; the clipping modes paint and report the clip as skipped. Glyphs
+are drawn from their outlines, unhinted: hinting instructions are never run.
+
+**What is NOT drawn yet, and is listed in `skipped`:** text in a font with no
+embedded program (`text-unembedded`, which includes the standard 14 such as
+Helvetica: their outlines are not in the file and none are bundled), in CFF
+(`text-cff`), Type 1 (`text-type1`) or Type 3 (`text-type3`) fonts, vertical
+text (`text-vertical`), predefined CJK CMaps (`text-cmap`), fonts that cannot
+be read (`text-font-invalid`) and single damaged glyphs (`text-glyph`);
+images and inline images, clipping, shadings, patterns, transparency (drawn
+opaque), Separation and DeviceN colour (drawn as grey), annotation
+appearances, and optional-content visibility (everything is drawn). The
+`text-*` entries name the fonts concerned. Check `complete()` before treating a
+render as the whole page.
 
 Rendering is bounded like reading: the pixel count is judged before anything
 is allocated, every operator counts against `maxOperators`, forms nest at most
