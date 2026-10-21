@@ -69,17 +69,21 @@ final class Filters
 
     private static function flate(string $data, Budget $budget): string
     {
-        $out = self::inflate($data, ZLIB_ENCODING_DEFLATE, $budget);
-        if ($out === '' && $data !== '') {
-            // Some producers omit the zlib header and write raw deflate.
-            $out = self::inflate($data, ZLIB_ENCODING_RAW, $budget);
+        $ended = false;
+        $out = self::inflate($data, ZLIB_ENCODING_DEFLATE, $budget, $ended);
+        if ($out === '' && $data !== '' && ! $ended) {
+            // Some producers omit the zlib header and write raw deflate. A
+            // zlib stream that ENDED with no output is simply empty (a blank
+            // page's content), not a candidate for the retry.
+            $out = self::inflate($data, ZLIB_ENCODING_RAW, $budget, $ended);
         }
 
         return $out;
     }
 
-    private static function inflate(string $data, int $encoding, Budget $budget): string
+    private static function inflate(string $data, int $encoding, Budget $budget, bool &$ended = false): string
     {
+        $ended = false;
         $ctx = @inflate_init($encoding);
         if ($ctx === false) {
             return '';
@@ -98,6 +102,8 @@ final class Filters
             // a few megabytes, not after it has finished expanding.
             $budget->decoding(strlen($out), min($len, $i + 4096));
             if (inflate_get_status($ctx) === ZLIB_STREAM_END) {
+                $ended = true;
+
                 break;
             }
         }

@@ -1,0 +1,378 @@
+{
+    "title": "Canonical fine-print document",
+    "page": {
+        "size": "letter",
+        "margins": {
+            "top": 72,
+            "bottom": 72,
+            "left": 72,
+            "right": 72
+        },
+        "header": {
+            "left": "Canonical | Internal",
+            "right": "October 2026"
+        },
+        "footer": {
+            "left": "fine-print golden",
+            "right": "Page {page} of {pages}"
+        }
+    },
+    "defaultFont": "Helvetica",
+    "defaultSize": 11,
+    "blocks": [
+        {
+            "type": "heading",
+            "level": 1,
+            "runs": [
+                {
+                    "text": "Summary",
+                    "color": "#1F3A5F"
+                }
+            ]
+        },
+        {
+            "type": "paragraph",
+            "align": "justify",
+            "runs": [
+                {
+                    "text": "Revenue rose "
+                },
+                {
+                    "text": "12%",
+                    "bold": true
+                },
+                {
+                    "text": " in the quarter, led by "
+                },
+                {
+                    "text": "EMEA",
+                    "italic": true
+                },
+                {
+                    "text": ". Details are on the "
+                },
+                {
+                    "text": "finance site",
+                    "link": "https://example.com/q3"
+                },
+                {
+                    "text": ". We ask the board to approve the plan as written, with the two amendments below, before the November meeting."
+                }
+            ]
+        },
+        {
+            "type": "paragraph",
+            "shading": "#EEF2F7",
+            "indentLeft": 8,
+            "borders": {
+                "left": {
+                    "style": "single",
+                    "width": 4,
+                    "color": "#1F3A5F"
+                }
+            },
+            "runs": [
+                {
+                    "text": "Decision: approve the Q4 plan.",
+                    "bold": true
+                }
+            ]
+        },
+        {
+            "type": "list",
+            "ordered": true,
+            "items": [
+                {
+                    "runs": [
+                        {
+                            "text": "Hire two engineers"
+                        }
+                    ],
+                    "children": [
+                        {
+                            "runs": [
+                                {
+                                    "text": "one in Berlin"
+                                }
+                            ]
+                        },
+                        {
+                            "runs": [
+                                {
+                                    "text": "one in Austin"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "runs": [
+                        {
+                            "text": "Close the Lisbon office"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "type": "list",
+            "items": [
+                {
+                    "runs": [
+                        {
+                            "text": "Bullet one"
+                        }
+                    ]
+                },
+                {
+                    "runs": [
+                        {
+                            "text": "Bullet two",
+                            "underline": true
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "type": "paragraph",
+            "keepNext": true,
+            "runs": [
+                {
+                    "text": "Table 1. Revenue by region",
+                    "bold": true
+                }
+            ]
+        },
+        {
+            "type": "table",
+            "widths": [
+                40,
+                30,
+                30
+            ],
+            "cellPadding": {
+                "top": 4,
+                "bottom": 4,
+                "left": 6,
+                "right": 6
+            },
+            "borders": {
+                "left": {
+                    "style": "none"
+                },
+                "right": {
+                    "style": "none"
+                },
+                "insideV": {
+                    "style": "none"
+                }
+            },
+            "rows": [
+                {
+                    "header": true,
+                    "cells": [
+                        {
+                            "blocks": [
+                                {
+                                    "type": "paragraph",
+                                    "runs": [
+                                        {
+                                            "text": "Region",
+                                            "color": "#FFFFFF"
+                                        }
+                                    ]
+                                }
+                            ],
+                            "shading": "#1F3A5F"
+                        },
+                        {
+                            "blocks": [
+                                {
+                                    "type": "paragraph",
+                                    "align": "right",
+                                    "runs": [
+                                        {
+                                            "text": "Revenue",
+                                            "color": "#FFFFFF"
+                                        }
+                                    ]
+                                }
+                            ],
+                            "shading": "#1F3A5F"
+                        },
+                        {
+                            "blocks": [
+                                {
+                                    "type": "paragraph",
+                                    "align": "right",
+                                    "runs": [
+                                        {
+                                            "text": "Growth",
+                                            "color": "#FFFFFF"
+                                        }
+                                    ]
+                                }
+                            ],
+                            "shading": "#1F3A5F"
+                        }
+                    ]
+                },
+                {
+                    "cells": [
+                        {
+                            "blocks": [
+                                {
+                                    "type": "paragraph",
+                                    "runs": [
+                                        {
+                                            "text": "EMEA"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "blocks": [
+                                {
+                                    "type": "paragraph",
+                                    "align": "right",
+                                    "runs": [
+                                        {
+                                            "text": "1,250,000"
+                                        }
+                                    ]
+                                }
+                            ]
+                        },
+                        {
+                            "blocks": [
+                                {
+                                    "type": "paragraph",
+                                    "align": "right",
+                                    "runs": [
+                                        {
+                                            "text": "18.4%",
+                                            "color": "#15803D"
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "cells": [
+                        {
+                            "blocks": [
+                                {
+                                    "type": "paragraph",
+                                    "runs": [
+                                        {
+                                            "text": "APAC and the rest of the world, combined"
+                                        }
+                                    ]
+                                }
+                            ],
+                            "colSpan": 2
+                        },
+                        {
+                            "blocks": [
+                                {
+                                    "type": "paragraph",
+                                    "align": "right",
+                                    "runs": [
+                                        {
+                                            "text": "-2.1%",
+                                            "color": "#B91C1C"
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "type": "code",
+            "language": "php",
+            "text": "$total = array_sum($revenue);\nif ($total > 0) {\n    echo number_format($total);\n}"
+        },
+        {
+            "type": "quote",
+            "blocks": [
+                {
+                    "type": "paragraph",
+                    "runs": [
+                        {
+                            "text": "The best plan is the one we execute."
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "type": "image",
+            "src": "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/wAARCAAQACADAREAAhEAAxEA/8QAFAABAAAAAAAAAAAAAAAAAAAAAP/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAgADAAA/AAAAAAAAAP/Z",
+            "widthPx": 128
+        },
+        {
+            "type": "image",
+            "src": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAGUlEQVR42mNgYKj4b8NQcb2CoWL9FoaKdkYGG5AAz0vr/QAAABlJREFUww0YZmIAksiYmaHCpkFOjuENDAMAgfMQ5gAzlu4AAAAASUVORK5CYII=",
+            "widthPx": 32
+        },
+        {
+            "type": "hr"
+        },
+        {
+            "type": "pageBreak"
+        },
+        {
+            "type": "heading",
+            "level": 2,
+            "runs": [
+                {
+                    "text": "Appendix"
+                }
+            ]
+        },
+        {
+            "type": "paragraph",
+            "runs": [
+                {
+                    "text": "Inline "
+                },
+                {
+                    "text": "code()",
+                    "code": true
+                },
+                {
+                    "text": ", "
+                },
+                {
+                    "text": "struck",
+                    "strike": true
+                },
+                {
+                    "text": ", "
+                },
+                {
+                    "text": "lit",
+                    "highlight": "#FEF08A"
+                },
+                {
+                    "text": ", Times",
+                    "font": "Times New Roman"
+                },
+                {
+                    "text": " and wide",
+                    "letterSpacing": 1.5
+                },
+                {
+                    "text": ".\nA second line."
+                }
+            ]
+        }
+    ]
+}

@@ -18,6 +18,27 @@ it('decodes FlateDecode', function () use ($sample) {
     expect(Filters::decodeChain(['FlateDecode'], (string) gzcompress($sample)))->toBe($sample);
 });
 
+it('decodes an EMPTY Flate stream to nothing, without retrying it as raw deflate', function () {
+    // A blank page's content stream is gzcompress(''). It ends cleanly with
+    // no output, which is not the same as failing; retrying it as raw deflate
+    // raised a data error (suppressed, but still raised). Found by the P2
+    // writer, whose empty pages are exactly this.
+    $errors = [];
+    set_error_handler(function (int $no, string $msg) use (&$errors): bool {
+        $errors[] = $msg;
+
+        return true;
+    });
+    try {
+        $out = Filters::decodeChain(['FlateDecode'], (string) gzcompress(''));
+    } finally {
+        restore_error_handler();
+    }
+
+    expect($out)->toBe('')
+        ->and($errors)->toBe([]);
+});
+
 it('decodes the abbreviated filter names used in inline images', function () use ($sample) {
     expect(Filters::decodeChain(['Fl'], (string) gzcompress($sample)))->toBe($sample)
         ->and(Filters::decodeChain(['AHx'], Encoders::asciiHex($sample)))->toBe($sample);

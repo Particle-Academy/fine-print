@@ -4,9 +4,17 @@ declare(strict_types=1);
 
 namespace FinePrint;
 
+use FinePrint\Exceptions\FontException;
 use FinePrint\Exceptions\RefusedException;
+use FinePrint\Exceptions\SchemaException;
 use FinePrint\Parser\PdfSyntaxException;
 use FinePrint\Security\AgentReadGuard;
+use FinePrint\Writer\Linter;
+use FinePrint\Writer\PdfWriter;
+use FinePrint\Writer\Repairer;
+use FinePrint\Writer\Schema;
+use FinePrint\Writer\Tabulator;
+use FinePrint\Writer\Validator;
 use InvalidArgumentException;
 
 /**
@@ -15,11 +23,16 @@ use InvalidArgumentException;
  * Mirrors {@see \HolySheet\Agent}, {@see \DarkSlide\Agent} and
  * {@see \LastWord\Agent}: static methods, JSON-friendly arrays in and out.
  *
- * The difference from the siblings is the direction of trust. Those packages
- * mostly WRITE documents an agent asked for; this one mostly READS documents
- * someone else wrote. So {@see read()} never hands an agent raw file content:
- * every string passes the {@see AgentReadGuard} first, and the active-content
- * report rides alongside without ever carrying a script body.
+ * Two directions, two trust rules:
+ *
+ * - READING ({@see read()}): the file is someone else's. Every string passes
+ *   the {@see AgentReadGuard} first, and the active-content report rides
+ *   alongside without ever carrying a script body.
+ * - WRITING ({@see toBytes()}, {@see write()}): the document model is
+ *   last-word's, validated then written, with {@see validateAndRepair()} and
+ *   {@see lint()} for the agent loop. The writer never emits active content
+ *   (no JavaScript, OpenAction, Launch, forms or embedded files), whatever the
+ *   model says; links are limited to http, https and mailto.
  */
 final class Agent
 {
@@ -169,6 +182,162 @@ final class Agent
         $out['outline'] = $outline;
 
         return $out;
+    }
+
+    /**
+     * Validate a document without writing anything: a `{path, message}` list,
+     * empty when the document is valid. Hand it back to the agent as-is.
+     *
+     * @param  array<string, mixed>  $doc
+     * @return list<array{path: string, message: string}>
+     */
+    public static function validate(array $doc): array
+    {
+        return (new Validator())->validate($doc);
+    }
+
+    /**
+     * Validate, and repair what can be repaired safely. The same shape as
+     * last-word's:
+     *
+     *   - `ok: true, errors: []`: valid as it was, `schema` is the input
+     *   - `ok: true, errors: [...]`: repaired; `schema` is the repaired document
+     *     and `errors` says what changed (dropped links, charts, images...)
+     *   - `ok: false`: still invalid after repair; `errors` says why
+     *
+     * @param  array<string, mixed>  $doc
+     * @return array{ok: bool, schema: array<string, mixed>, errors: list<array{path: string, message: string}>}
+     */
+    public static function validateAndRepair(array $doc): array
+    {
+        $errors = self::validate($doc);
+        if ($errors === []) {
+            return ['ok' => true, 'schema' => $doc, 'errors' => []];
+        }
+        ['doc' => $repaired, 'notes' => $notes] = (new Repairer())->repair($doc);
+        $remaining = self::validate($repaired);
+
+        return ['ok' => $remaining === [], 'schema' => $repaired, 'errors' => array_merge($notes, $remaining)];
+    }
+
+    /**
+     * The PDF bytes for a document. Deterministic: the same document and
+     * options give the same bytes.
+     *
+     * Options:
+     *   - `fonts`: TrueType families the host makes available, embedded as
+     *     subsets: `['Inter' => ['regular' => $pathOrBytes, 'bold' => ...,
+     *     'italic' => ..., 'boldItalic' => ...]]`, or `['Inter' => $pathOrBytes]`
+     *     for one face. A run selects one with `font: "Inter"`. Fonts come from
+     *     the HOST only: the model can name a family but never supply a file or
+     *     a path.
+     *   - `compress` (bool, default true): Flate-compress content streams.
+     *
+     * @param  array<string, mixed>  $doc
+     * @param  array{fonts?: array<string, string|array<string, string>>, compress?: bool}  $options
+     *
+     * @throws SchemaException when the document is invalid; call validateAndRepair() first
+     * @throws FontException when a host font cannot be used
+     */
+    public static function toBytes(array $doc, array $options = []): string
+    {
+        self::assertValid($doc);
+
+        return (new PdfWriter($options))->write($doc)['bytes'];
+    }
+
+    /**
+     * Write a document to disk. Same options as {@see toBytes()}.
+     *
+     * @param  array<string, mixed>  $doc
+     * @param  array{fonts?: array<string, string|array<string, string>>, compress?: bool}  $options
+     * @return array{path: string, bytes: int, pages: int}
+     *
+     * @throws SchemaException
+     * @throws FontException
+     */
+    public static function write(array $doc, string $path, array $options = []): array
+    {
+        self::assertValid($doc);
+        $out = (new PdfWriter($options))->write($doc);
+        if (file_put_contents($path, $out['bytes']) === false) {
+            throw new InvalidArgumentException('Could not write '.$path);
+        }
+
+        return ['path' => $path, 'bytes' => strlen($out['bytes']), 'pages' => $out['pages']];
+    }
+
+    /**
+     * A document built from rows of data: a finished table (header row with a
+     * fill, numbers right-aligned), the way holy-sheet's `fromArray` builds a
+     * workbook from rows. Returns the MODEL, so the agent can add prose around
+     * it before writing.
+     *
+     * @param  list<list<mixed>>  $rows
+     * @param  list<string>|null  $headers  the first row is the header when null
+     * @param  array{caption?: string, source?: string}  $options
+     * @return array<string, mixed>
+     */
+    public static function fromArray(array $rows, ?array $headers = null, ?string $title = null, array $options = []): array
+    {
+        return Tabulator::document($rows, $headers, $title, $options);
+    }
+
+    /**
+     * What will be wrong with the written PDF, before anyone opens it: text the
+     * chosen font cannot draw, substituted fonts, blocks too tall for a page,
+     * words broken mid-word, sparse pages, missing page numbers, placeholders,
+     * and anything the read-back guard would flag (hidden text, instruction-like
+     * text, invisible characters).
+     *
+     * Each finding is `{rule, severity, path, message}` plus `page` where it has
+     * one. An invalid document returns its validation errors as `schema`
+     * findings instead.
+     *
+     * @param  array<string, mixed>  $doc
+     * @param  array{fonts?: array<string, string|array<string, string>>}  $options
+     * @return list<array<string, mixed>>
+     */
+    public static function lint(array $doc, array $options = []): array
+    {
+        return (new Linter())->lint($doc, $options);
+    }
+
+    /**
+     * JSON Schema for the document model, for LLM tool registration.
+     *
+     * @return array<string, mixed>
+     */
+    public static function jsonSchema(): array
+    {
+        return Schema::jsonSchema();
+    }
+
+    /**
+     * The agent guide: how to build a PDF that reads well and reads back
+     * cleanly. Give it to the model with the schema.
+     */
+    public static function guide(): string
+    {
+        $path = dirname(__DIR__).'/agent-guide/building-pdfs.md';
+        $text = is_file($path) ? file_get_contents($path) : false;
+        if ($text === false) {
+            throw new \RuntimeException('[fine-print] agent-guide/building-pdfs.md is missing from this install.');
+        }
+
+        return $text;
+    }
+
+    /** @param array<string, mixed> $doc */
+    private static function assertValid(array $doc): void
+    {
+        $errors = self::validate($doc);
+        if ($errors !== []) {
+            throw new SchemaException(
+                'Document failed schema validation. Call Agent::validateAndRepair() for a recoverable form.',
+                $errors,
+            );
+        }
     }
 
     /**

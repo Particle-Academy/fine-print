@@ -114,7 +114,11 @@ it('stops at the time budget', function () {
 });
 
 it('stops at the memory budget', function () {
-    $data = random_bytes(6 * 1024 * 1024);
+    // Deterministic on purpose. This used random_bytes(), and about one run in
+    // fifteen the random stream happened to lex into too few tokens for the
+    // budget to be sampled, so the test failed for reasons of luck. Hundreds
+    // of thousands of shown strings grow memory steadily, every run.
+    $data = 'BT /F1 12 Tf 72 700 Td '.str_repeat('(abcdefghijklmnop) Tj ', 280_000).'ET';
     $pdf = PdfBuilder::textPdf([$data])->build();
 
     expect(fpRefusal(fn () => Document::open($pdf, new Limits(memoryBytes: 2 * 1024 * 1024))->text(1)))->toBe('memory_budget');

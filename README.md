@@ -2,19 +2,22 @@
 
 [![Fancified](art/fancified.svg)](https://particle.academy)
 
-A PDF reader for agents, in pure PHP. It parses PDFs, extracts their text in
-reading order, reports active content (JavaScript, launch actions, forms,
-embedded files) without ever running it, and passes everything an agent reads
-through a **prompt-injection guard** that can flag, redact or discard.
+A PDF reader and writer for agents, in pure PHP. It parses PDFs, extracts
+their text in reading order, reports active content (JavaScript, launch
+actions, forms, embedded files) without ever running it, and passes everything
+an agent reads through a **prompt-injection guard** that can flag, redact or
+discard. It also **writes** PDFs from the same JSON document model as
+[`last-word`](https://github.com/Particle-Academy/last-word), and never writes
+active content into them.
 
 **Zero runtime dependencies.** No GD, no Imagick, no Ghostscript, no poppler,
 no third-party PDF library. Just PHP 8.4 and its bundled `zlib`, `mbstring`,
 `ctype` and `json`.
 
-> **Status: 0.x, reader only.** A writer (build PDFs from a JSON document
-> model), a page renderer (PNG) and Laravel page-image serving are planned
-> later phases, not part of this release. Pre-1.0, breaking changes may land
-> in a minor release; the [changelog](CHANGELOG.md) marks each one.
+> **Status: 0.x, reader and writer.** A page renderer (PNG) and Laravel
+> page-image serving are planned later phases, not part of this release.
+> Pre-1.0, breaking changes may land in a minor release; the
+> [changelog](CHANGELOG.md) marks each one.
 
 ## Why
 
@@ -203,6 +206,65 @@ $doc->activeContent();
 
 Reading order is line by line, top to bottom. **Multi-column layouts read across
 the columns**, which is a known limit.
+
+## Writing PDFs
+
+The document model is last-word's: a `title`, `page` geometry with running
+`header`/`footer` bands, and `blocks`.
+
+```php
+use FinePrint\Agent;
+
+$doc = [
+    'title' => 'Q3 board memo',
+    'page' => ['size' => 'letter', 'footer' => ['right' => 'Page {page} of {pages}']],
+    'blocks' => [
+        ['type' => 'heading', 'level' => 1, 'runs' => [['text' => 'Summary']]],
+        ['type' => 'paragraph', 'align' => 'justify', 'runs' => [
+            ['text' => 'Revenue rose '], ['text' => '12%', 'bold' => true],
+            ['text' => '; details on the '], ['text' => 'finance site', 'link' => 'https://example.com/q3'], ['text' => '.'],
+        ]],
+    ],
+];
+
+Agent::validate($doc);            // [{path, message}], empty when valid
+Agent::validateAndRepair($doc);   // {ok, schema, errors}: repairs listed
+Agent::lint($doc);                // what will be wrong, before writing
+Agent::write($doc, 'memo.pdf');   // or Agent::toBytes($doc)
+Agent::fromArray($rows);          // rows of data -> a finished table document
+Agent::jsonSchema();              // for LLM tool registration
+Agent::guide();                   // the agent guide (agent-guide/building-pdfs.md)
+```
+
+- **Blocks:** heading, paragraph, list (nested, ordered or not), table (column
+  weights, borders, cell padding, fills, column and row spans, header rows
+  repeated on every page), code, quote, image (PNG and JPEG data URLs), page
+  break and rule. No `chart` block yet.
+- **Runs:** bold, italic, underline, strike, inline code, colour, highlight,
+  size, letter spacing, font, and links.
+- **Layout:** line wrapping and justification with real font metrics; headings
+  kept with what follows; no single line left at the foot or head of a page.
+- **Fonts:** the standard 14 text faces (Helvetica, Times, Courier) with their
+  metrics, in Windows-1252. For anything else, the host registers TrueType
+  fonts, embedded as subsets with a ToUnicode map so the text extracts exactly:
+
+  ```php
+  Agent::write($doc, 'out.pdf', ['fonts' => ['Inter' => ['regular' => '/fonts/Inter.ttf', 'bold' => '/fonts/Inter-Bold.ttf']]]);
+  ```
+
+  Fonts come from the host only. A document can name a family, never supply a
+  file or a path. CFF-flavoured OpenType (`.otf`) and collections are not
+  supported yet; a font whose licence forbids embedding is refused.
+- **Output:** PDF 1.7 with a classic cross-reference table. **Deterministic**:
+  no timestamps, so the same document gives the same bytes.
+
+**What it never writes:** JavaScript, open actions, additional actions, launch
+actions, forms or widgets, embedded files, rich media or XFA, whatever the
+document contains. Links must be `http`, `https` or `mailto`. Text from the
+model reaches the file only as hex strings, and zero-width, bidi-control and
+tag characters are removed, so the writer cannot be used to smuggle hidden
+text. Everything it writes reads back through `Agent::read()` with no guard
+findings.
 
 ## License
 

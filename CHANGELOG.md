@@ -50,3 +50,57 @@ BREAKING and says what a consumer must do.
   scanning, including objects inside object streams. Cycles in references, the
   page tree, the outline, form XObjects and `/Prev` chains are survived and
   listed in `warnings`.
+- **A PDF writer** (`Agent::toBytes()`, `Agent::write()`), from the same JSON
+  document model as `particle-academy/last-word`: headings, paragraphs with
+  styled runs (bold, italic, underline, strike, inline code, colour,
+  highlight, size, letter spacing, font, links), nested lists, tables (column
+  weights, width, alignment, borders, cell padding, fills, column and row
+  spans, header rows repeated on every page), code, quotes, PNG and JPEG
+  images, page breaks and rules; letter, legal and A4 in either orientation,
+  margins, and running headers and footers with `{page}` / `{pages}`. Text is
+  wrapped and justified with real font metrics; headings keep with the block
+  after them, and no paragraph leaves a single line at the foot or head of a
+  page. No `chart` block yet: validation says so and repair drops it.
+- **Fonts**: the standard 14 text faces with their metrics (widths derived from
+  the metric-compatible Liberation fonts through this package's own TrueType
+  reader, and checked against Adobe's AFM values), written with explicit
+  `/Widths`. Host-registered **TrueType fonts are embedded as subsets** (Type0,
+  Identity-H, with a ToUnicode CMap, so text extracts exactly, astral
+  characters included). Fonts come only from the host's `fonts` option, never
+  from the document. CFF (`.otf`) fonts and collections are refused for now,
+  as are fonts whose licence forbids embedding.
+- **Images**: JPEG embedded as-is; PNG passed through untouched with a PNG
+  predictor when PDF can carry it, and decoded with zlib only when it cannot
+  (alpha, `tRNS` transparency, interlacing), with an 8-bit soft mask. Every
+  PNG is checked to inflate to exactly the size its header promises, so a
+  decompression bomb is refused instead of copied into the PDF.
+- **Output** is PDF 1.7 with a classic cross-reference table, and is
+  deterministic: no timestamps, and the file ID is a hash of the body.
+- **The writer never emits active content**: no JavaScript, open or additional
+  actions, launch actions, forms, widgets, embedded files, rich media or XFA,
+  whatever the document contains. Links must be `http`, `https` or `mailto`
+  and are checked twice. Model text is written only as hex strings, and
+  zero-width, bidi-control, tag and control characters are removed, so the
+  writer cannot carry hidden text.
+- **`Agent::validate()` and `Agent::validateAndRepair()`**, in last-word's
+  shapes; repair removes a disallowed link (keeping its text), raises sub-1pt
+  text to 1pt, and drops charts and unreadable images, reporting each change.
+- **`Agent::lint()`**: writes the document, reads it back through the guard,
+  and reports what will be wrong: unencodable characters, substituted fonts,
+  words broken mid-word, overflowing blocks, stranded headings, sparse pages,
+  missing page numbers, placeholders, header/footer overlap, and anything the
+  read-back guard flags. Findings never quote the document's text.
+- **`Agent::fromArray()`**: rows of data as a finished table document (header
+  row, numbers right-aligned with one precision per column, optional caption
+  and source), as holy-sheet's `fromArray` builds a workbook.
+- **`Agent::jsonSchema()`** and **`Agent::guide()`**, the agent guide in
+  `agent-guide/building-pdfs.md`, hash-pinned by a test.
+
+### Fixed
+
+- An empty Flate stream (a blank page's content) was retried as raw deflate,
+  which raised a suppressed zlib data-error warning. It now decodes to nothing,
+  quietly. Found by the writer's own blank pages.
+- The memory-budget test built its fixture from `random_bytes()` and failed
+  about one run in fifteen, when the random stream lexed into too few tokens
+  for the budget to be sampled. The fixture is now deterministic.
