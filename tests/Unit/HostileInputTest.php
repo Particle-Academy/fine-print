@@ -124,12 +124,20 @@ it('stops at the memory budget', function () {
     expect(fpRefusal(fn () => Document::open($pdf, new Limits(memoryBytes: 2 * 1024 * 1024))->text(1)))->toBe('memory_budget');
 });
 
-it('refuses an encrypted file rather than guessing at it', function () {
+it('refuses an encrypted file that needs a password, rather than guessing at it', function () {
+    // Since 2026-10-21 (owner ruling) files that open with an EMPTY password
+    // are read; see EncryptionTest. One that needs a real password is not.
+    $pdf = FinePrint\Tests\Support\Encryptor::pdf(['secret'], ['revision' => 3, 'userPassword' => 'hunter2']);
+
+    expect(fpRefusal(fn () => Document::open($pdf)))->toBe('encrypted');
+});
+
+it('refuses a stub encryption dictionary as corrupt', function () {
     $b = PdfBuilder::textPdf([PdfBuilder::line('secret')]);
     $enc = $b->object('<< /Filter /Standard /V 2 /R 3 /Length 128 /O <00> /U <00> /P -4 >>');
     $pdf = $b->build(['trailer' => ' /Encrypt '.$enc.' 0 R /ID [<01> <01>]']);
 
-    expect(fpRefusal(fn () => Document::open($pdf)))->toBe('encrypted');
+    expect(fpRefusal(fn () => Document::open($pdf)))->toBe('corrupt');
 });
 
 it('refuses garbage after a header, which no scan can repair', function () {

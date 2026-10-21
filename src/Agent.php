@@ -54,7 +54,7 @@ final class Agent
      *                 to an agent, since an excerpt of an injection is one.
      *   - `limits`    a {@see Limits} or an array of its named arguments
      *
-     * A file that is refused — not a PDF, encrypted, damaged beyond repair,
+     * A file that is refused — not a PDF, needs a password, damaged beyond repair,
      * or over a limit — returns `['ok' => false, 'refused' => ['reason' => ...,
      * 'message' => ...]]` rather than throwing, so an agent loop gets an answer
      * it can act on. Bad OPTIONS still throw: that is the caller's bug.
@@ -246,6 +246,7 @@ final class Agent
             'redacted' => $disclosure['redacted'],
             'unredacted' => $unredacted,
             'notice' => $disclosure['notice'],
+            'encryption' => $doc->encryption(),
         ];
         if ($result['discarded']) {
             return $out;

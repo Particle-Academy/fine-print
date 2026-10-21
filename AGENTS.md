@@ -28,6 +28,24 @@ in the envelope.
 | writer: model, layout, PDF syntax | `src/Writer` | no. The document comes from an agent, which may have copied it from a hostile file |
 | TrueType reader, PNG/JPEG readers | `src/Writer/Fonts`, `src/Writer/Images` | no. Host fonts and image data URLs may be user uploads |
 
+## Encryption (owner ruling 2026-10-21: open empty-password files)
+
+`Security\StandardSecurity` authenticates with the EMPTY user password only
+and derives the key; `Crypto\Rc4` and `Crypto\Aes` are ours (no openssl).
+`Document::secure()` runs right after the xref is read and BEFORE any object is
+resolved, then clears the cache, so nothing is ever cached still encrypted.
+`parseAt()` decrypts every object read from the file except the `/Encrypt`
+dictionary itself; cross-reference streams, objects inside object streams
+(their container was decrypted), a signature's `/Contents` and, under
+`EncryptMetadata false`, the metadata stream stay as they are.
+
+- Needs a password, another handler, or an unknown V/R/CFM: `encrypted`.
+  Malformed (types, lengths, key length, a missing crypt filter): `corrupt`.
+- Never try any password but "". Never put the key, `/O`, `/U` or anything
+  derived from them in a report or a warning.
+- Permissions are reported (`Document::encryption()`), never enforced here.
+- A damaged AES string or stream decrypts to empty with a warning.
+
 ## The writer
 
 `Validator` / `Repairer` / `Schema` (last-word's model) → `Layout\Composer`

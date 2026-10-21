@@ -45,7 +45,7 @@ BREAKING and says what a consumer must do.
   per-stream and total decoded bytes, decompression ratio, operators per page,
   form depth, page count, time and memory. A breach is a `RefusedException`
   with a stable `reason`, and `Agent::read()` returns it as
-  `ok: false`. **Encrypted files are refused.**
+  `ok: false`. **Files that need a password are refused** (empty-password files open, below).
 - **Repair**: a missing, truncated or lying cross-reference table is rebuilt by
   scanning, including objects inside object streams. Cycles in references, the
   page tree, the outline, form XObjects and `/Prev` chains are survived and
@@ -109,11 +109,27 @@ BREAKING and says what a consumer must do.
   ignored. Excerpts stay off unless the host asks. The agent guide explains the
   flow.
 
+- **Encrypted PDFs that open with an empty user password are read** (owner
+  ruling, 2026-10-21). The standard security handler in full: RC4 40-128-bit
+  and AES-128 (R2-R4), AES-256 (R5, R6), with this package's own RC4 and AES in
+  pure PHP (no openssl). The guard and the active-content scan run on the
+  decrypted content. `Agent::read()` and `Document::encryption()` report the
+  handler, version, revision, algorithm and the permission flags (print,
+  modify, copy, annotate, fill forms, accessibility, assemble, high-quality
+  print): reported, never enforced. Checked against LibreOffice in both
+  directions: it reads our RC4 and AES fixtures, and we read its
+  permission-only export with the right flags.
+
 ### Changed
 
-- `Agent::read()`'s result gains three keys at the end: `redacted`,
-  `unredacted` and `notice`. Nothing was removed or renamed, so a consumer
-  reading the existing keys needs to do nothing.
+- **Encrypted files are no longer all refused.** One that needs a real password
+  is still refused as `encrypted`, as is one using a non-standard security
+  handler; a MALFORMED encryption dictionary is now `corrupt` instead of
+  `encrypted`. If you branched on `reason === 'encrypted'` to reject every
+  encrypted upload, check `$read['encryption']` instead.
+- `Agent::read()`'s result gains four keys at the end: `redacted`,
+  `unredacted`, `notice` and `encryption`. Nothing was removed or renamed, so a
+  consumer reading the existing keys needs to do nothing.
 - `AgentReadGuard::apply()` also returns `acted`: the findings its policy cut
   or withheld on (empty under `flag`).
 

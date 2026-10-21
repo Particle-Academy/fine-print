@@ -44,7 +44,7 @@ use FinePrint\Agent;
 $read = Agent::read('/path/to/upload.pdf');      // bytes work too
 
 if (! $read['ok']) {
-    // Refused: not a PDF, encrypted, damaged beyond repair, or over a limit.
+    // Refused: not a PDF, needs a password, damaged beyond repair, or over a limit.
     return $read['refused']['reason'];            // e.g. "decompression_bomb"
 }
 
@@ -190,8 +190,25 @@ loops, a form XObject that draws itself, and a `/Prev` chain that loops. A
 missing, truncated or lying cross-reference table is **rebuilt by scanning**,
 and `$read['repaired']` says so.
 
-**Encrypted files are refused**, including those encrypted with an empty user
-password, which many producers use only to set permissions.
+**Encrypted files open when their user password is empty**, which is how
+many producers set permission flags without asking anyone for a password.
+The standard security handler is supported in full: RC4 40 to 128-bit and
+AES-128 (R2-R4), and AES-256 (R5, R6), with this package's own RC4 and AES (no
+openssl). The guard and the active-content scan run on the decrypted content
+as usual, and the result says what it was:
+
+```php
+$read['encryption'];
+// ['encrypted' => true, 'handler' => 'Standard', 'version' => 4, 'revision' => 4,
+//  'algorithm' => 'AES-128', 'encryptMetadata' => true,
+//  'permissions' => ['print' => false, 'modify' => false, 'copy' => true, ...]]
+```
+
+Permissions are **reported, not enforced**: they are the author's request to
+viewers, and what to do with them is the host's decision. A file that needs a
+real password is still refused (`encrypted`), as is one using another security
+handler (certificates). A malformed encryption dictionary is `corrupt`.
+Nothing tries a password other than the empty one, and no report carries a key.
 
 ## The raw view, for hosts
 

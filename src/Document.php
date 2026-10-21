@@ -15,6 +15,7 @@ use FinePrint\Objects\PdfString;
 use FinePrint\Parser\Parser;
 use FinePrint\Parser\PdfSyntaxException;
 use FinePrint\Security\ActiveContentScanner;
+use FinePrint\Security\StandardSecurity;
 use FinePrint\Text\Layout;
 use FinePrint\Text\TextExtractor;
 use FinePrint\Text\TextString;
@@ -66,6 +67,12 @@ final class Document
     /** @var list<string> */
     private array $warnings = [];
 
+    /** The empty-password key, when the file is encrypted. */
+    private ?StandardSecurity $security = null;
+
+    /** The /Encrypt dictionary's own object, which is never encrypted. */
+    private ?int $encryptNum = null;
+
     private function __construct(private readonly string $data, Limits $limits)
     {
         $this->trailer = new PdfDict();
@@ -105,17 +112,120 @@ final class Document
 
         try {
             $this->readXref();
+            // Encryption is set up BEFORE any object is resolved, so nothing
+            // is ever cached in its encrypted form.
+            $this->secure();
             $ok = $this->resolve($this->trailer->get('Root')) instanceof PdfDict;
         } catch (PdfSyntaxException) {
             $ok = false;
         }
         if (! $ok) {
             $this->repair();
+            $this->secure();
+        }
+    }
+
+    /**
+     * Open an encrypted file with the empty user password, or refuse it.
+     * See {@see StandardSecurity}.
+     *
+     * @throws RefusedException
+     */
+    private function secure(): void
+    {
+        $ref = $this->trailer->get('Encrypt');
+        if ($ref === null || $this->security !== null) {
+            return;
+        }
+        $enc = $this->resolve($ref);
+        if (! $enc instanceof PdfDict) {
+            throw new RefusedException('corrupt', 'The file\'s encryption dictionary is missing or is not a dictionary.');
+        }
+        $id = $this->resolve($this->trailer->get('ID'));
+        $id0 = is_array($id) && ($id[0] ?? null) instanceof PdfString ? $id[0]->bytes : '';
+        $this->security = StandardSecurity::open($enc, $id0, fn (mixed $v) => $this->resolve($v), $this->budget);
+        $this->encryptNum = $ref instanceof PdfRef ? $ref->num : null;
+
+        // Anything read while finding the key was read raw: forget it.
+        $this->cache = $this->encryptNum !== null ? [$this->encryptNum => $enc] : [];
+        $this->objStreams = [];
+    }
+
+    /**
+     * How the file was encrypted, and its permission flags, or null for a
+     * plain file. Never the key or a password.
+     *
+     * Permissions are REPORTED, not enforced: they are the author's request
+     * to viewers, and what a host does with them is the host's decision.
+     *
+     * @return ?array<string, mixed>
+     */
+    public function encryption(): ?array
+    {
+        return $this->security?->report();
+    }
+
+    /** Decrypt every string and stream in an object read from the file. */
+    private function decryptValue(mixed $v, int $num, int $gen): mixed
+    {
+        if ($v instanceof PdfString) {
+            $plain = $this->security?->string($v->bytes, $num, $gen);
+            if ($plain === null) {
+                $this->warn('a string could not be decrypted; read as empty');
+            }
+
+            return new PdfString($plain ?? '', $v->hex);
+        }
+        if ($v instanceof PdfStream) {
+            $type = $v->dict->name('Type');
+            if ($type === 'XRef') {
+                return $v;   // cross-reference streams are never encrypted
+            }
+            $dict = $this->decryptValue($v->dict, $num, $gen);
+            $raw = $v->raw;
+            $plainMetadata = $type === 'Metadata' && ! $this->security?->encryptMetadata;
+            if (! $plainMetadata && ! $this->identityCrypt($v->dict)) {
+                $raw = $this->security?->stream($raw, $num, $gen);
+                if ($raw === null) {
+                    $this->warn('a stream could not be decrypted; read as empty');
+                    $raw = '';
+                }
+            }
+
+            return new PdfStream($dict, $raw, $v->objectNumber);
+        }
+        if ($v instanceof PdfDict) {
+            $out = [];
+            $signature = $v->name('Type') === 'Sig' || $v->has('ByteRange');
+            foreach ($v->entries as $k => $child) {
+                // A signature's /Contents is never encrypted.
+                $out[$k] = $signature && $k === 'Contents' ? $child : $this->decryptValue($child, $num, $gen);
+            }
+
+            return new PdfDict($out);
+        }
+        if (is_array($v)) {
+            return array_map(fn (mixed $c) => $this->decryptValue($c, $num, $gen), $v);
         }
 
-        if ($this->trailer->get('Encrypt') !== null) {
-            throw new RefusedException('encrypted', 'The file is encrypted. Encrypted PDFs are refused rather than guessed at.');
+        return $v;
+    }
+
+    /** A stream with its own `/Crypt` filter naming `/Identity` is stored in the clear. */
+    private function identityCrypt(PdfDict $dict): bool
+    {
+        $f = $dict->get('Filter');
+        $names = $f instanceof PdfName ? [$f] : (is_array($f) ? $f : []);
+        foreach ($names as $n) {
+            if ($n instanceof PdfName && $n->value === 'Crypt') {
+                $parms = $dict->get('DecodeParms');
+                $parms = is_array($parms) ? ($parms[array_search($n, $names, true)] ?? null) : $parms;
+
+                return ! ($parms instanceof PdfDict) || $parms->name('Name') === null || $parms->name('Name') === 'Identity';
+            }
         }
+
+        return false;
     }
 
     /** The running budget; for the readers inside this package. */
@@ -456,7 +566,11 @@ final class Document
             $this->parser->seek($at);
             $o = $this->parser->parseIndirect();
             if ($o['num'] === $expect) {
-                return [true, $o['value']];
+                $value = $this->security !== null && $o['num'] !== $this->encryptNum
+                    ? $this->decryptValue($o['value'], $o['num'], $o['gen'])
+                    : $o['value'];
+
+                return [true, $value];
             }
         } catch (PdfSyntaxException) {
             // not here
