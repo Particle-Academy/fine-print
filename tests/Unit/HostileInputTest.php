@@ -124,6 +124,127 @@ it('stops at the memory budget', function () {
     expect(fpRefusal(fn () => Document::open($pdf, new Limits(memoryBytes: 2 * 1024 * 1024))->text(1)))->toBe('memory_budget');
 });
 
+/**
+ * One page holding ONE show operator of $n character codes, Flate-compressed.
+ *
+ * The show-string bytes are a run of 'a' broken every 100 bytes by a
+ * pseudo-random letter: that deflates to about 1/55 of its size, so 3 million
+ * codes are a ~55 KB file, yet stays well under the 500x ratio cap. (A plain
+ * str_repeat is refused as a decompression bomb before the text is ever read,
+ * which tests nothing about the text path.)
+ *
+ * Kinds: `tj` a simple font and Tj; `TJ` the same string inside a TJ array;
+ * `type0` a Type0 font with Identity-H (fixed two-byte codes); `type0-cmap` a
+ * Type0 font whose ToUnicode CMap declares the codespace, so codes are cut by
+ * the CMap.
+ */
+function fpHugeShow(string $kind, int $n): string
+{
+    mt_srand(7);
+    $bytes = $kind === 'tj' || $kind === 'TJ' ? $n : 2 * $n;
+    $s = '';
+    while (strlen($s) < $bytes) {
+        $s .= str_repeat('a', 99).chr(mt_rand(98, 122));
+    }
+    $s = substr($s, 0, $bytes);
+
+    $show = match ($kind) {
+        'tj' => '('.$s.') Tj',
+        'TJ' => '[('.$s.')] TJ',
+        default => '<'.bin2hex($s).'> Tj',
+    };
+    $b = new PdfBuilder();
+    $catalog = $b->reserve();
+    $tree = $b->reserve();
+    if ($kind === 'tj' || $kind === 'TJ') {
+        $font = $b->object('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
+    } else {
+        $tu = '';
+        if ($kind === 'type0-cmap') {
+            $cmap = "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n"
+                ."1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n"
+                ."1 beginbfrange\n<6161> <6161> <0061>\nendbfrange\n"
+                ."endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n";
+            $tu = ' /ToUnicode '.$b->stream($cmap).' 0 R';
+        }
+        $font = $b->object('<< /Type /Font /Subtype /Type0 /BaseFont /X /Encoding /Identity-H'.$tu
+            .' /DescendantFonts [<< /Type /Font /Subtype /CIDFontType2 /BaseFont /X'
+            .' /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> >>] >>');
+    }
+    $c = $b->stream('BT /F1 12 Tf 72 720 Td '.$show.' ET', '', true);
+    $page = $b->object('<< /Type /Page /Parent '.$tree.' 0 R /Contents '.$c.' 0 R /Resources << /Font << /F1 '.$font.' 0 R >> >> >>');
+    $b->object('<< /Type /Pages /Kids ['.$page.' 0 R] /Count 1 /MediaBox [0 0 612 792] >>', $tree);
+    $b->object('<< /Type /Catalog /Pages '.$tree.' 0 R >>', $catalog);
+
+    return $b->build();
+}
+
+it('reads one huge show string without building a list of its codes', function (string $kind) {
+    // Found by measurement (2026-10-21): the extractor decoded a show string
+    // into a list of [text, width, space] triples, about 160 bytes a code, so
+    // a ~55 KB file with one 3-million-code Tj took Agent::read() past PHP's
+    // 512 MB memory limit: a FATAL error, not a refusal. 400 thousand codes
+    // cost ~64 MB that way; streamed, they cost the text itself.
+    $pdf = fpHugeShow($kind, 400_000);
+    gc_collect_cycles();
+    memory_reset_peak_usage();
+    $base = memory_get_usage();
+    $read = Agent::read($pdf);
+
+    expect($read['ok'])->toBeTrue()
+        ->and(mb_strlen($read['pages'][0]['text']))->toBeGreaterThan(390_000)
+        ->and(memory_get_peak_usage() - $base)->toBeLessThan(24 * 1024 * 1024);
+})->with(['tj', 'TJ', 'type0', 'type0-cmap']);
+
+it('ends a 3-million-code show string cleanly under the default limits, never in a fatal error', function (string $kind) {
+    // In its own process: the failure being guarded against is PHP's memory
+    // limit, which in-process would kill the suite rather than fail a test.
+    $pdf = fpHugeShow($kind, 3_000_000);
+    expect(strlen($pdf))->toBeLessThan(200 * 1024);
+    $path = tempnam(sys_get_temp_dir(), 'fp-huge-');
+    file_put_contents($path, $pdf);
+    try {
+        $out = [];
+        exec(escapeshellarg(PHP_BINARY).' -d memory_limit=512M '
+            .escapeshellarg(dirname(__DIR__).'/Support/agent-read-child.php').' '.escapeshellarg($path).' 2>&1', $out, $code);
+    } finally {
+        @unlink($path);
+    }
+    $last = json_decode((string) end($out), true);
+
+    expect($code)->toBe(0, implode("\n", $out))
+        ->and($last)->toBeArray()
+        ->and($last['ok'] || in_array($last['reason'], ['memory_budget', 'time_budget'], true))->toBeTrue()
+        ->and($last['peak'])->toBeLessThan((new Limits())->memoryBytes);
+})->with(['tj', 'type0', 'type0-cmap']);
+
+it('stops at the time budget inside one show string, not after it', function () {
+    // A ToUnicode CMap of 100 thousand one-byte ranges that never match makes
+    // every code a 100-thousand-step lookup. 40 thousand codes in ONE Tj are
+    // billions of steps; the budget used to be checked only between
+    // operators, so the read ran for minutes past a half-second budget.
+    $b = new PdfBuilder();
+    $catalog = $b->reserve();
+    $tree = $b->reserve();
+    $cmap = "/CIDInit /ProcSet findresource begin\n12 dict begin\nbegincmap\n"
+        ."1 begincodespacerange\n<00> <FF>\nendcodespacerange\n"
+        ."100000 beginbfrange\n".str_repeat("<01> <01> <0041>\n", 100_000)."endbfrange\n"
+        ."endcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n";
+    $tu = $b->stream($cmap, '', true);
+    $font = $b->object('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /ToUnicode '.$tu.' 0 R >>');
+    $c = $b->stream('BT /F1 12 Tf 72 720 Td ('.str_repeat('a', 40_000).') Tj ET', '', true);
+    $page = $b->object('<< /Type /Page /Parent '.$tree.' 0 R /Contents '.$c.' 0 R /Resources << /Font << /F1 '.$font.' 0 R >> >> >>');
+    $b->object('<< /Type /Pages /Kids ['.$page.' 0 R] /Count 1 /MediaBox [0 0 612 792] >>', $tree);
+    $b->object('<< /Type /Catalog /Pages '.$tree.' 0 R >>', $catalog);
+
+    $t = hrtime(true);
+    $read = Agent::read($b->build(), ['limits' => ['timeSeconds' => 0.5, 'ratioFloorBytes' => 64 * 1024 * 1024]]);
+
+    expect($read['ok'])->toBeFalse()
+        ->and($read['refused']['reason'])->toBe('time_budget')
+        ->and((hrtime(true) - $t) / 1e9)->toBeLessThan(3.0);
+});
+
 it('refuses an encrypted file that needs a password, rather than guessing at it', function () {
     // Since 2026-10-21 (owner ruling) files that open with an EMPTY password
     // are read; see EncryptionTest. One that needs a real password is not.

@@ -213,3 +213,25 @@ BREAKING and says what a consumer must do.
 - The memory-budget test built its fixture from `random_bytes()` and failed
   about one run in fifteen, when the random stream lexed into too few tokens
   for the budget to be sampled. The fixture is now deterministic.
+
+### Security
+
+- **`Agent::read()` crashed with a FATAL out-of-memory error on one huge show
+  string** (measured 2026-10-21, PHP 8.4, `memory_limit` 512M, default
+  limits). A ~55 KB Flate-compressed file holding a single `Tj` of 3 million
+  codes peaked at 480 MB and died in `Text\Font::decode()`, which built a
+  list of every code (about 160-250 bytes a code); a Type0 version died at
+  505 MB. With the extractor fixed, the same Type0 file then died at 486 MB
+  inside the guard, whose `normalise()` split the page into a list of every
+  character and kept a per-character offset map. A fatal error is not a
+  refusal: the caller gets no answer at all. Now `Font::decode()` is a
+  generator, the extractor ticks the budget per code, and the guard walks the
+  text without listing it, keeping its offset map as packed breakpoints. The
+  same files now read successfully at 18.5 MB (simple font) and 32.7 MB
+  (Type0) peak. Nothing to do as a consumer.
+- **A show string could run far past the time budget.** The budget was only
+  checked between operators, never inside one show string, and a ToUnicode
+  CMap of 100 000 ranges makes each code's lookup 100 000 steps. A 40 000-code
+  `Tj` against a 0.5 s budget ran for 276 s and then returned `ok: true`. Each
+  code now ticks the budget weighted by its lookup cost (`Font::codeCost()`),
+  and the same file is refused as `time_budget` in about 0.5 s.

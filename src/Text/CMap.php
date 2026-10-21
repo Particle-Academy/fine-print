@@ -120,6 +120,16 @@ final class CMap
         return $this->codespace !== [];
     }
 
+    /**
+     * How many bfranges {@see lookup()} may scan for one code. A lookup is
+     * linear in them (up to 100 000), so a caller budgeting per code must
+     * weigh each code by this, or a million cheap-looking codes are hours.
+     */
+    public function rangeCount(): int
+    {
+        return count($this->ranges);
+    }
+
     /** Whether this is an encoding CMap (it maps codes to CIDs). */
     public function hasCids(): bool
     {

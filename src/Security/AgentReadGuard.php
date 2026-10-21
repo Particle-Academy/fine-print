@@ -181,8 +181,8 @@ final class AgentReadGuard
         // Instructions, over the normalised text, mapped back to the original.
         [$norm, $map] = self::normalise($text);
         foreach (self::instructionMatches($norm) as [$id, $severity, , $nStart, $nLen]) {
-            $start = $map[$nStart];
-            $end = $map[$nStart + $nLen] ?? strlen($text);
+            $start = self::original($map, $nStart);
+            $end = self::original($map, $nStart + $nLen);
             // Trim the mapped end back over any invisible run it swallowed.
             $end = $start + strlen(rtrim(substr($text, $start, $end - $start)));
             $isHidden = false;
@@ -236,39 +236,91 @@ final class AgentReadGuard
     /**
      * Normalise for matching, keeping a byte map back to the original.
      *
-     * @return array{0: string, 1: array<int, int>} normalised text, normalised byte offset => original byte offset
+     * Walks the text one character at a time without ever listing them: a
+     * page can be millions of characters, and a list of them (plus a map
+     * entry per character) once cost ~50 bytes a character and took a
+     * 3-million-character page past PHP's memory limit (a fatal error).
+     *
+     * The map is the offset DELTA (original minus normalised), which only
+     * changes where normalising dropped or shrank something: a skipped
+     * invisible character, collapsed whitespace, a no-break space. It is
+     * stored as breakpoints, 8 bytes each (normalised offset, delta, both
+     * unsigned 32-bit), so ordinary text costs almost nothing.
+     *
+     * @return array{0: string, 1: string} normalised text, packed breakpoints
      */
     private static function normalise(string $text): array
     {
         $norm = '';
-        $map = [];
+        $normLen = 0;
+        $map = '';
+        $delta = 0;
         $pos = 0;
+        $n = strlen($text);
         $lastSpace = true;
-        foreach (mb_str_split($text, 1, 'UTF-8') as $ch) {
-            $len = strlen($ch);
-            if (preg_match(self::INVISIBLE, $ch)) {
+        $mark = function () use (&$map, &$delta, &$normLen, &$pos): void {
+            if ($pos - $normLen !== $delta || $map === '') {
+                $delta = $pos - $normLen;
+                $map .= pack('VV', $normLen, $delta);
+            }
+        };
+        while ($pos < $n) {
+            $b = ord($text[$pos]);
+            $len = match (true) {
+                $b < 0x80 => 1,
+                $b >= 0xF0 => 4,
+                $b >= 0xE0 => 3,
+                $b >= 0xC0 => 2,
+                default => 1,
+            };
+            $len = min($len, $n - $pos);
+            $ch = $len === 1 ? $text[$pos] : substr($text, $pos, $len);
+            if ($len > 1 && preg_match(self::INVISIBLE, $ch)) {
                 $pos += $len;
 
                 continue;
             }
-            if ($ch === "\u{A0}" || ctype_space($ch)) {
+            if ($ch === "\u{A0}" || ($len === 1 && ctype_space($ch))) {
                 if (! $lastSpace) {
-                    $map[strlen($norm)] = $pos;
+                    $mark();
                     $norm .= ' ';
+                    $normLen++;
                     $lastSpace = true;
                 }
                 $pos += $len;
 
                 continue;
             }
-            $map[strlen($norm)] = $pos;
+            $mark();
             $norm .= $len === 1 ? strtolower($ch) : $ch;
+            $normLen += $len;
             $lastSpace = false;
             $pos += $len;
         }
-        $map[strlen($norm)] = $pos;
+        $mark();
 
         return [$norm, $map];
+    }
+
+    /** The original byte offset of a normalised one, from normalise()'s breakpoints. */
+    private static function original(string $map, int $normOffset): int
+    {
+        // The last breakpoint at or before $normOffset (binary search).
+        $lo = 0;
+        $hi = intdiv(strlen($map), 8) - 1;
+        $delta = 0;
+        while ($lo <= $hi) {
+            $mid = ($lo + $hi) >> 1;
+            ['o' => $o, 'd' => $d] = unpack('Vo/Vd', $map, $mid * 8);
+            if ($o <= $normOffset) {
+                $delta = $d;
+                $lo = $mid + 1;
+            } else {
+                $hi = $mid - 1;
+            }
+        }
+
+        return $normOffset + $delta;
     }
 
     /**

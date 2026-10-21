@@ -61,13 +61,20 @@ final class Font
     }
 
     /**
-     * @return list<array{0: string, 1: float, 2: bool}> [UTF-8, width in 1/1000 text space, is single-byte code 32]
+     * The codes of a show string as [UTF-8, width in 1/1000 text space, is
+     * single-byte code 32], ONE AT A TIME.
+     *
+     * A generator, never a list: a show string can hold millions of codes, and
+     * a list of triples costs ~250 bytes a code, so one 3-million-code Tj in a
+     * 55 KB file once took Agent::read() past PHP's memory limit (a fatal
+     * error). The caller ticks the budget per code.
+     *
+     * @return \Generator<int, array{0: string, 1: float, 2: bool}>
      */
-    public function decode(string $bytes): array
+    public function decode(string $bytes): \Generator
     {
-        $out = [];
         if ($this->composite) {
-            foreach ($this->split($bytes) as $code) {
+            foreach ($this->codes($bytes) as $code) {
                 if ($code === '') {
                     continue;
                 }
@@ -76,10 +83,10 @@ final class Font
                 if ($u === null) {
                     $u = $this->ucs2 ? TextString::scrub((string) @mb_convert_encoding($code, 'UTF-8', 'UTF-16BE')) : "\u{FFFD}";
                 }
-                $out[] = [$u, ($this->widths[$cid] ?? $this->defaultWidth) * $this->widthScale, false];
+                yield [$u, ($this->widths[$cid] ?? $this->defaultWidth) * $this->widthScale, false];
             }
 
-            return $out;
+            return;
         }
 
         $len = strlen($bytes);
@@ -89,10 +96,18 @@ final class Font
             if ($u === null) {
                 $u = $this->encoding[$c] ?? (($c >= 0x20 && $c < 0x7F) ? chr($c) : "\u{FFFD}");
             }
-            $out[] = [$u, ($this->widths[$c] ?? $this->defaultWidth) * $this->widthScale, $c === 32];
+            yield [$u, ($this->widths[$c] ?? $this->defaultWidth) * $this->widthScale, $c === 32];
         }
+    }
 
-        return $out;
+    /**
+     * Budget ticks one decoded code is worth: 1, plus one per 64 ToUnicode
+     * ranges its lookup may scan. Ticking 1 per code let a 100 000-range
+     * CMap spend ~5 s between budget checks.
+     */
+    public function codeCost(): int
+    {
+        return 1 + intdiv($this->toUnicode?->rangeCount() ?? 0, 64);
     }
 
     // --- for the renderer (P3b): the same font data, without guessing ---------

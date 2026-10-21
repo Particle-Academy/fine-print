@@ -172,6 +172,14 @@ does a hostile file get out of this", never by which directory it is in.
   fatal error, a hang, or a partial result presented as a whole one. Damage
   that is survived instead goes in `Document::warnings()`, and warnings never
   contain file content.
+- **Show strings and page text stream; nothing lists them.** `Font::decode()`
+  and `Font::codes()` are generators, the extractor ticks the budget per code
+  weighted by `Font::codeCost()` (ToUnicode lookups are linear in ranges),
+  and `AgentReadGuard::normalise()` walks the text byte by byte with a packed
+  breakpoint map. A list per code or per character once took a 55 KB file
+  past PHP's memory limit in both places (a fatal error). `Font::split()` and
+  `CMap::split()` still build lists and must not be put back on a hostile
+  path.
 - **Decompression is judged while it runs.** Flate is fed in 4 KB chunks, so a
   bomb is stopped after a few megabytes rather than after it has expanded.
   Do not "simplify" it to `gzuncompress()`.

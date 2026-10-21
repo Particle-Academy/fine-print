@@ -400,7 +400,12 @@ final class TextExtractor
 
         $start = $this->renderMatrix();
         $text = '';
+        // Streamed, and every code ticks the budget: one show string can hold
+        // millions of codes, and only the time and memory budgets bound it.
+        // Each code is weighed by what its ToUnicode lookup may cost.
+        $cost = $font->codeCost();
         foreach ($font->decode($s->bytes) as [$u, $w, $isSpace]) {
+            $this->budget->tick($cost);
             $text .= $u;
             $tx = ($w / 1000 * $size + $this->gs['tc'] + ($isSpace ? $this->gs['tw'] : 0)) * $th;
             $this->tm = self::mul([1, 0, 0, 1, $tx, 0], $this->tm);
