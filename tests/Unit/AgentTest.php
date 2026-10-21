@@ -26,7 +26,7 @@ it('counts pages from bytes or from a path', function () {
 it('reads a document into the documented shape', function () {
     $read = Agent::read(PdfBuilder::textPdf([PdfBuilder::line('Hello')], ['mediaBox' => '[0 0 595 842]'])->build());
 
-    expect(array_keys($read))->toBe(['ok', 'version', 'pageCount', 'repaired', 'pages', 'metadata', 'outline', 'annotations', 'activeContent', 'warnings', 'guard'])
+    expect(array_keys($read))->toBe(['ok', 'version', 'pageCount', 'repaired', 'pages', 'metadata', 'outline', 'annotations', 'activeContent', 'warnings', 'guard', 'redacted', 'unredacted', 'notice'])
         ->and($read['pages'])->toBe([['page' => 1, 'width' => 595.0, 'height' => 842.0, 'text' => 'Hello']])
         ->and($read['guard'])->toBe(['policy' => 'redact', 'threshold' => 'medium', 'discarded' => false, 'findings' => []]);
 });

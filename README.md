@@ -89,6 +89,21 @@ Agent::read($pdf, ['policy' => 'redact']);   // the default
 - **`discard`**: any finding at or above the threshold and the agent gets **no
   content at all**, only the findings.
 
+**The agent is told when content was redacted.** A redacting read carries a
+`notice` in plain words (how many items, what kind, where) and a `redacted`
+summary (`count`, `byRule`, `where`), never the cut text itself. The original
+is available only as a deliberate second call, which a host may or may not
+expose as a tool:
+
+```php
+$read = Agent::read($pdf);              // redacted, with $read['notice'] saying so
+$open = Agent::readUnredacted($pdf);    // original text, findings attached, unredacted: true
+```
+
+`readUnredacted()` always uses the `flag` policy and ignores a `policy`
+option. Under `discard`, the notice says the content was withheld and does not
+offer the second step.
+
 `threshold` is `low`, `medium` (default) or `high`. Joiners and directional
 marks are `low` because they are legitimate in emoji and in right-to-left and
 Indic scripts. They are reported, but not acted on at the default threshold.

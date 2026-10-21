@@ -70,7 +70,10 @@ final class AgentReadGuard
 
     /**
      * @param  list<array{location: array<string, mixed>, text: string, spans?: list<array{start: int, length: int, flags: list<string>}>}>  $segments
-     * @return array{texts: list<?string>, findings: list<array<string, mixed>>, discarded: bool}
+     * `acted` is the findings the policy acted on: what `redact` cut, or what
+     * made `discard` withhold everything. Empty under `flag`.
+     *
+     * @return array{texts: list<?string>, findings: list<array<string, mixed>>, discarded: bool, acted: list<array<string, mixed>>}
      */
     public function apply(array $segments): array
     {
@@ -94,7 +97,12 @@ final class AgentReadGuard
             };
         }
 
-        return ['texts' => $texts, 'findings' => $findings, 'discarded' => $discarded];
+        return [
+            'texts' => $texts,
+            'findings' => $findings,
+            'discarded' => $discarded,
+            'acted' => $this->policy === 'flag' ? [] : array_values($actionable),
+        ];
     }
 
     /**

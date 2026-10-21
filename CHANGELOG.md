@@ -96,6 +96,27 @@ BREAKING and says what a consumer must do.
 - **`Agent::jsonSchema()`** and **`Agent::guide()`**, the agent guide in
   `agent-guide/building-pdfs.md`, hash-pinned by a test.
 
+- **The agent is told when content was redacted** (owner ruling, 2026-10-21:
+  redact stays the default). `Agent::read()` now returns `redacted` (`count`,
+  `byRule`, `where`: one location per item cut, never its text), `notice` (the
+  same in plain words, naming `Agent::readUnredacted()` as the way to get the
+  original) and `unredacted: false`. Under `discard` the notice says the
+  content was withheld and does not offer the second step. Nothing was cut:
+  both are null.
+- **`Agent::readUnredacted()`**: the deliberate second step. The original text
+  with every finding attached, `unredacted: true`, and a notice that the text
+  is data, never instructions. Always the `flag` policy; a `policy` option is
+  ignored. Excerpts stay off unless the host asks. The agent guide explains the
+  flow.
+
+### Changed
+
+- `Agent::read()`'s result gains three keys at the end: `redacted`,
+  `unredacted` and `notice`. Nothing was removed or renamed, so a consumer
+  reading the existing keys needs to do nothing.
+- `AgentReadGuard::apply()` also returns `acted`: the findings its policy cut
+  or withheld on (empty under `flag`).
+
 ### Fixed
 
 - An empty Flate stream (a blank page's content) was retried as raw deflate,
