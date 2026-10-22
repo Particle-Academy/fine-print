@@ -10,12 +10,17 @@ BREAKING and says what a consumer must do.
 
 ### Added
 
+- **P3c inline images and our own baseline JPEG decoder:** Huffman DC/AC,
+  dequantisation/IDCT, Gray/RGB/YCbCr/CMYK/YCCK, subsampling, separate scans,
+  restart markers and byte stuffing. Adobe APP14 overrides ColorTransform;
+  PDF Decode is applied afterwards. Inline boundaries preserve binary EI
+  bytes, including within compressed samples and JPEG metadata. Progressive
+  and other unsupported codecs paint reported checkerboard placeholders.
 - **P3c image XObjects (first step):** packed Gray/RGB/CMYK samples at
   1/2/4/8/16 bits, Flate/LZW and PNG/TIFF predictors, Decode arrays, Indexed
   palettes and fill-colour stencil masks, transformed with bounded
   nearest-neighbour sampling. `maxImagePixels` defaults to 16 million,
-  checked before decoding. Unsupported/damaged images remain reported;
-  JPEG and inline-image support follow separately.
+  checked before decoding. Unsupported/damaged images remain reported.
 - **A PDF reader in pure PHP**, with no runtime dependency beyond PHP's bundled
   `zlib`, `mbstring`, `ctype` and `json`. Reads the header, cross-reference
   tables and streams, hybrid files, incremental updates (newest object wins)
@@ -241,6 +246,10 @@ BREAKING and says what a consumer must do.
 
 ### Security
 
+- JPEG frame dimensions and padded component-plane bytes are bounded before
+  allocation. Malformed tables, scans, runs, selectors and entropy stop cleanly;
+  decoder and inline-boundary loops use the render budget. Invalid filter
+  parameter array entries cannot escape as PHP method-call errors.
 - Stream predictors validate dimensions before allocation and use packed
   byte rows instead of PHP arrays per byte. TIFF differencing now handles
   every PDF sample depth and predictor loops tick the supplied budget.

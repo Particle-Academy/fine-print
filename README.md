@@ -16,7 +16,7 @@ no third-party PDF library. Just PHP 8.4 and its bundled `zlib`, `mbstring`,
 
 > **Status: 0.x, reader and writer, plus the first steps of a page renderer.**
 > The renderer draws vector paths, TrueType text and sampled image XObjects
-> (see [Rendering pages](#rendering-pages)); other font types, image codecs and
+> (see [Rendering pages](#rendering-pages)); other font types, advanced image codecs and
 > clipping are later steps, and Laravel page-image serving is a later phase. Pre-1.0, breaking changes may land in a minor release; the
 > [changelog](CHANGELOG.md) marks each one.
 
@@ -182,6 +182,7 @@ Agent::read($pdf, ['limits' => ['maxPages' => 200, 'timeSeconds' => 5]]);
 | `timeSeconds` | 30 | `time_budget` |
 | `memoryBytes` | 256 MB growth | `memory_budget` |
 | `maxRenderPixels` | 25,000,000 per rendered page | `too_many_pixels` (judged before the raster is allocated) |
+| `maxImagePixels` | 16,000,000 per source image | `too_many_pixels` (judged before decoding) |
 | `renderTimeSeconds` | 30 per rendered page | `time_budget` |
 
 Other refusals are `not_pdf`, `corrupt` and `encrypted`. A refusal message
@@ -353,6 +354,10 @@ arrays, Indexed palettes, and stencil masks in the current fill colour.
 Source row padding and PDF's top-to-bottom sample order are preserved.
 Images use nearest-neighbour sampling under any non-singular transform.
 `maxImagePixels` bounds the source image before decoding (default 16 million).
+Inline images use the same sampling and preserve binary `EI` bytes. Baseline
+JPEG is decoded by our own Huffman/IDCT engine, including grayscale,
+YCbCr/RGB, CMYK/YCCK, subsampling, restarts and separate sequential scans.
+Adobe markers and PDF ColorTransform/Decode settings are respected.
 
 **What is NOT drawn yet, and is listed in `skipped`:** text in any other font
 with no embedded program (`text-unembedded`, which includes Symbol and
@@ -360,7 +365,8 @@ ZapfDingbats: nothing is bundled for them), in CFF
 (`text-cff`), Type 1 (`text-type1`) or Type 3 (`text-type3`) fonts, vertical
 text (`text-vertical`), predefined CJK CMaps (`text-cmap`), fonts that cannot
 be read (`text-font-invalid`) and single damaged glyphs (`text-glyph`);
-JPEG/JPX/CCITT/JBIG2 or damaged images, inline images, clipping, shadings, patterns, transparency (drawn
+Progressive/arithmetic/lossless JPEG, JPX/CCITT/JBIG2 or damaged images (drawn
+as checkerboard placeholders), clipping, shadings, patterns, transparency (drawn
 opaque), Separation and DeviceN colour (drawn as grey), annotation
 appearances, and optional-content visibility (everything is drawn). The
 `text-*` entries name the fonts concerned. Check `complete()` before treating a

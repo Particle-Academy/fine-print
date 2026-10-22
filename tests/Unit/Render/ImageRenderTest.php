@@ -98,6 +98,7 @@ it('reports truncated images and unsupported codecs without presenting the page 
     'JPX' => ['x', '/Filter /JPXDecode'],
     'CCITT' => ['x', '/Filter /CCITTFaxDecode'],
     'JBIG2' => ['x', '/Filter /JBIG2Decode'],
+    'chained opaque' => ['x', '/Filter [/JPXDecode /DCTDecode]'],
 ]);
 
 it('reports an unimplemented image soft mask', function () {
@@ -105,6 +106,12 @@ it('reports an unimplemented image soft mask', function () {
         $b->stream("\x80", '/Subtype /Image /Width 1 /Height 1 /BitsPerComponent 8 /ColorSpace /DeviceGray');
     }));
     expect($r->complete())->toBeFalse()->and(array_column($r->skipped, 'kind'))->toContain('transparency');
+});
+
+it('paints a visible placeholder for an unsupported codec and reports the omission', function () {
+    $r = Renderer::render(fpiPage('unsupported', '/Width 1 /Height 1 /BitsPerComponent 8 /ColorSpace /DeviceRGB /Filter /JPXDecode'));
+    expect($r->pixel(12, 12))->toBe([224, 224, 224])->and($r->pixel(27, 12))->toBe([192, 192, 192])
+        ->and($r->complete())->toBeFalse()->and(array_column($r->skipped, 'kind'))->toContain('image');
 });
 
 it('renders the writer own PNG image output', function () {

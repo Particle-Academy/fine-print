@@ -74,8 +74,8 @@ final class Encoders
         return $out."\x80";
     }
 
-    /** LZW with EarlyChange = 1, the PDF default. */
-    public static function lzw(string $data): string
+    /** LZW with either PDF EarlyChange rule (default 1). */
+    public static function lzw(string $data, int $early = 1): string
     {
         $dict = [];
         for ($i = 0; $i < 256; $i++) {
@@ -101,7 +101,7 @@ final class Encoders
             $emit($dict[$w]);
             $dict[$w.$c] = $next++;
             // Early change: widen one code early.
-            if ($next + 1 > (1 << $width) && $width < 12) {
+            if ($next + $early > (1 << $width) && $width < 12) {
                 $width++;
             }
             if ($next >= 4094) {
@@ -120,7 +120,7 @@ final class Encoders
             // The decoder adds one more entry on reading that code, and may
             // widen before reading EOD; mirror it.
             $next++;
-            if ($next + 1 > (1 << $width) && $width < 12) {
+            if ($next + $early > (1 << $width) && $width < 12) {
                 $width++;
             }
         }

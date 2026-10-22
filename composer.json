@@ -1,6 +1,6 @@
 {
     "name": "particle-academy/fine-print",
-    "description": "First-party PDF reader and writer for agentic docs, in pure PHP with zero runtime dependencies. Writes PDF 1.7 from the last-word JSON document model (standard fonts, embedded TrueType subsets, PNG/JPEG, tables, lists, headers and footers) and never writes active content. Parses PDFs (xref tables and streams, incremental updates, object streams, Flate/LZW/ASCII85/ASCIIHex/RunLength), extracts text in reading order, reports active content (JavaScript, launch actions, forms, embedded files) without ever executing it, and passes everything an agent reads through a prompt-injection guard that can flag, redact or discard. Hostile-input limits refuse bombs, cycles and corrupt files cleanly. Renders pages to PNG in pure PHP (vector paths and text in embedded TrueType fonts so far; what is not drawn yet is reported).",
+    "description": "First-party PDF reader, writer and renderer for agentic docs, in pure PHP with zero runtime dependencies. Writes PDF 1.7 from the last-word JSON document model and never writes active content. Parses PDFs, extracts text in reading order, reports active content without executing it, and guards agent reads against prompt injection. Renders vector paths, TrueType text, sampled images and baseline JPEG to PNG. Hostile-input limits refuse bombs, cycles and oversized images cleanly; unsupported content is reported.",
     "type": "library",
     "license": "MIT",
     "keywords": [

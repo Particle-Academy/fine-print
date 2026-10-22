@@ -16,8 +16,8 @@ use FinePrint\Objects\PdfStream;
 use FinePrint\Objects\PdfString;
 use FinePrint\Render\Glyphs\RenderFont;
 use FinePrint\Render\Images\ImagePainter;
+use FinePrint\Render\Images\InlineImageReader;
 use FinePrint\Render\Images\SampledImage;
-use FinePrint\Parser\InlineImage;
 use FinePrint\Parser\Keyword;
 use FinePrint\Parser\Parser;
 use FinePrint\Parser\PdfSyntaxException;
@@ -29,7 +29,7 @@ use Generator;
  * painting, and form XObjects, drawn onto a {@see Raster}.
  *
  * It interprets; nothing in a content stream executes. What P3a does not
- * draw yet — text, images, clipping, shading, patterns, transparency — is
+ * draw yet — other font types, clipping, shading, patterns, transparency — is
  * counted into `skipped` so a caller knows the picture is incomplete.
  *
  * Bounded like P1's text interpreter: every operator, page and forms
@@ -125,8 +125,8 @@ final class Interpreter
     }
 
     /**
-     * Operators and their operands, one at a time. Inline images are skipped
-     * here, where the parser is, and come out as a bare `BI`.
+     * Operators and operands, one at a time. Inline images are read here,
+     * where the parser is, and travel as a PdfStream operand of `BI`.
      *
      * @return Generator<int, array{0: string, 1: list<mixed>}>
      */
@@ -156,7 +156,11 @@ final class Interpreter
                 continue;
             }
             if ($v->word === 'BI') {
-                InlineImage::skip($p);
+                $image = InlineImageReader::read($p, $this->budget);
+                yield ['BI', $image !== null ? [$image] : []];
+                $ops = [];
+
+                continue;
             }
             yield [$v->word, $ops];
             $ops = [];
@@ -457,7 +461,11 @@ final class Interpreter
 
                 return;
             case 'BI':
-                $this->skip('inline-image');
+                if (($o[0] ?? null) instanceof PdfStream) {
+                    $this->image($o[0], $resources, 'inline-image');
+                } else {
+                    $this->skip('inline-image');
+                }
 
                 return;
             case 'BDC':
@@ -918,6 +926,7 @@ final class Interpreter
             }
         } catch (ImageException) {
             $this->skip($kind);
+            ImagePainter::paint(SampledImage::placeholder(), $this->raster, $this->gs->ctm, [0, 0, 0], $this->budget);
         }
     }
 

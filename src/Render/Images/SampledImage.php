@@ -107,7 +107,11 @@ final class SampledImage
             }
         }
         unset($number);
-        $data = self::stream($stream, $doc, $budget);
+        $jpeg = null;
+        $data = self::stream($stream, $doc, $budget, $jpeg);
+        if ($jpeg !== null && ($bits !== 8 || $jpeg !== [$w, $h, $components] || $mask || $palette !== null)) {
+            throw new ImageException('JPEG frame does not match the PDF image dictionary.');
+        }
         if (strlen($data) !== $row * $h) {
             throw new ImageException('Image sample length does not match its dimensions.');
         }
@@ -116,7 +120,7 @@ final class SampledImage
     }
 
     /** Decode with the RENDER budget, including indirect filter parameters. */
-    public static function stream(PdfStream $s, Document $doc, Budget $budget): string
+    public static function stream(PdfStream $s, Document $doc, Budget $budget, ?array &$jpeg = null): string
     {
         $filters = $doc->resolve($s->dict->get('Filter'));
         $params = $doc->resolve($s->dict->get('DecodeParms'));
@@ -134,12 +138,28 @@ final class SampledImage
             }
             $names[] = $filter->value;
             $p = $doc->resolve($params[$i] ?? null);
+            if ($p !== null && ! $p instanceof PdfDict) {
+                throw new ImageException('Invalid image filter parameters.');
+            }
             if ($p instanceof PdfDict) {
                 $p = new PdfDict(array_map(fn ($v) => $doc->resolve($v), $p->entries));
             }
             $plist[] = $p;
         }
         try {
+            $last = count($names) - 1;
+            if ($last >= 0 && in_array($names[$last], ['DCT', 'DCTDecode'], true)) {
+                $transform = ($plist[$last] ?? null)?->get('ColorTransform');
+                if ($transform !== null && ! in_array($transform, [0, 1], true)) {
+                    throw new ImageException('Invalid DCT ColorTransform.');
+                }
+                array_pop($names);
+                $encoded = Filters::decodeChain($names, $s->raw, $plist, $budget);
+                $decoded = JpegDecoder::decode($encoded, $budget, $transform);
+                $jpeg = [$decoded['width'], $decoded['height'], $decoded['components']];
+
+                return $decoded['data'];
+            }
             return Filters::decodeChain($names, $s->raw, $plist, $budget);
         } catch (OpaqueStreamException) {
             throw new ImageException('Unsupported image codec.');
@@ -175,5 +195,11 @@ final class SampledImage
         }
 
         return $this->space->toRgb($values);
+    }
+
+    /** Visible checkerboard for content we deliberately could not decode. */
+    public static function placeholder(): self
+    {
+        return new self(2, 2, 8, 1, "\xE0\xC0\xC0\xE0", ColourSpace::gray(), [0.0, 1.0], false, null, 0);
     }
 }
