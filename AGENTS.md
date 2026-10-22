@@ -89,6 +89,12 @@ the canvas, filled nonzero glyph by glyph, stroked through the P3a stroker.
 - **Placement follows FreeType**: the outline moves by `lsb - xMin` (phantom
   point pp1) at the top level only. Measured in Chromium before it was
   written.
+- **Text origins snap DOWN to the next whole device pixel** (owner ruling
+  2026-10-22). After glyph-to-device mapping, y becomes `ceil(y)`; an aligned
+  origin stays put. This is a deliberate offset from exact PDF geometry at
+  every scale, including rotated text. X and advances stay exact. Fill and
+  stroke move together; stroke translates its device matrix so its user-space
+  pen still transforms correctly. Do not replace this with a constant shift.
 - **Font names in reports** are BaseFont stripped to `[A-Za-z0-9+_.-]`, at
   most 63 characters, at most 16 per kind (`RenderFont::cleanName()`).
 - **Non-embedded standard-14 text draws from bundled fonts**
@@ -242,8 +248,9 @@ does a hostile file get out of this", never by which directory it is in.
   cannot see a one-pixel error. So: the `glyphs` golden keeps glyph origins
   on half points (whole pixels at the oracle's 2x) and uses an unhinted
   font, and exact placement is pinned by `TextRenderTest`'s pixel tests. Do
-  not "fix" our text to snap, bleed or hint to please Chromium without
-  deciding it is wanted. Turning off PDFium's Skia renderer changes nothing.
+  not add x snapping, bleed or hinting to please Chromium. Downward y snapping
+  is the deliberate placement policy above. Turning off PDFium's Skia renderer
+  changes nothing.
 - **A test file must run on its own.** Shared text helpers live in
   `tests/Support/text-helpers.php` (loaded by `tests/Pest.php`). When they
   lived in `TextRenderTest.php`, `TextHostileTest` passed in the full suite

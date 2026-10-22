@@ -34,6 +34,59 @@ it('draws a glyph from an embedded TrueType font where the text matrix puts it',
         ->and($r->complete())->toBeTrue();
 });
 
+it('snaps a fractional text origin down to a whole device pixel at every scale', function (float $scale, float $deviceY) {
+    $y = 100 - $deviceY / $scale;
+    $r = fptRender('BT /T1 8 Tf 20 '.$y.' Td (I) Tj ET', scale: $scale);
+    $bottom = (int) ceil($deviceY);
+    $top = $bottom - (int) (8 * $scale);
+    $x = (int) (24 * $scale);
+
+    // Whole rows are covered after the origin snaps, including when the
+    // nearest whole pixel would have been above it. Aligned origins stay put.
+    expect($r->pixel($x, $top - 1))->toBe(FPT_W)
+        ->and($r->pixel($x, $top))->toBe(FPT_K)
+        ->and($r->pixel($x, $bottom - 1))->toBe(FPT_K)
+        ->and($r->pixel($x, $bottom))->toBe(FPT_W)
+        ->and($r->pixel((int) (20 * $scale) - 1, $top + 1))->toBe(FPT_W)
+        ->and($r->pixel((int) (20 * $scale), $top + 1))->toBe(FPT_K);
+})->with([1.0, 1.25, 1.5, 2.0, 2.5])->with([60.0, 60.25, 60.75]);
+
+it('snaps stroked text in device space through the CTM', function (string $ctm, string $position) {
+    // Both CTMs put an 8 px square at device x 20..28, y 52.25..60.25.
+    // At 2 px stroke width, the snapped outside is y 52..62, not 51.25..61.25.
+    $r = fptRender($ctm.' cm 2 w BT /T1 8 Tf 2 Tr '.$position.' Tm (I) Tj ET');
+
+    expect($r->pixel(24, 51))->toBe(FPT_W)
+        ->and($r->pixel(24, 52))->toBe(FPT_K)
+        ->and($r->pixel(24, 60))->toBe(FPT_K)
+        ->and($r->pixel(24, 61))->toBe(FPT_K)
+        ->and($r->pixel(24, 62))->toBe(FPT_W)
+        ->and($r->pixel(18, 56))->toBe(FPT_W)
+        ->and($r->pixel(19, 56))->toBe(FPT_K);
+})->with([
+    'translated' => ['1 0 0 1 0 0.75', '1 0 0 1 20 39'],
+    'rotated' => ['0 1 -1 0 60 0', '0 -1 1 0 39.75 40'],
+]);
+
+it('snaps each rotated glyph without changing text advances', function () {
+    // Origins are (50,49.75) and (50,41.75) in device space. The L's foot
+    // points up the page; snapping moves its right edge down by 0.25 px.
+    $r = fptRender('BT /T1 8 Tf 0 1 -1 0 50 50.25 Tm (LL) Tj ET');
+
+    expect($r->pixel(45, 49))->toBe(FPT_K)
+        ->and($r->pixel(45, 50))->toBe(FPT_W)
+        ->and($r->pixel(45, 41))->toBe(FPT_K)
+        ->and($r->pixel(45, 42))->toBe(FPT_W);
+});
+
+it('snaps a negative device origin toward the bottom of the page', function () {
+    $r = fptRender('BT /T1 8 Tf 1 0 0 -1 20 100.25 Tm (I) Tj ET');
+
+    expect($r->pixel(24, 0))->toBe(FPT_K)
+        ->and($r->pixel(24, 7))->toBe(FPT_K)
+        ->and($r->pixel(24, 8))->toBe(FPT_W);
+});
+
 it('paints text in the fill colour', function () {
     $r = fptRender('1 0 0 rg BT /T1 10 Tf 20 30 Td (I) Tj ET');
 

@@ -35,7 +35,8 @@ const FP_GOLDEN_MISMATCH = 0.01;
  * cases, and measurement put the cause in the oracle, not the renderer:
  *
  *   1. PDFium snaps every glyph origin to a whole device pixel (measured
- *      BEFORE the run, sandbox/fine-print/p3b/snap.php). We place exactly.
+ *      BEFORE the run, sandbox/fine-print/p3b/snap.php). We placed exactly
+ *      then; the owner has since chosen downward y snapping (below).
  *   2. PDFium's glyphs bleed past their outlines, up and to the right:
  *      about 0.04 px left, 0.3 px right, 0.34 px top, 0 bottom, at its 2x
  *      (measured on the `glyphs` bars after the run; our edges sit exactly
@@ -79,6 +80,24 @@ const FP_GLYPHS_INKED = 0.25;
 const FP_TEXT_MAE = 8.0;
 const FP_TEXT_MISMATCH = 0.08;
 const FP_TEXT_INKED = 0.65;
+
+/*
+ * Downward y snapping, owner ruling 2026-10-22. These fixture-specific 2x
+ * bounds were fixed BEFORE the first golden run with snapping. The prediction
+ * is the "y snapped to the pixel below" row in the envelope plan
+ * .ai/plans/fine-print.md, under "Half-pixel text shift: built, NOT shipped":
+ * p2-text MAE 0.49, p2-dejavu MAE 5.86. Running snap-modes.php on this exact
+ * implementation, before this suite, measured MAE / page / inked:
+ *   p2-text@2x   0.485 / 0.527% / 28.83%
+ *   p2-dejavu@2x 5.857 / 5.723% / 51.36%
+ * Bounds allow about 10% headroom. glyphs and std14 keep their old bounds
+ * (on-grid origins do not move). 1x also keeps its old bounds: its goldens
+ * average Chromium's 2x render, so cannot represent snapping at 1x; the known
+ * MAE increase there (p2-text 0.72 -> 1.04, DejaVu 5.87 -> 6.79) is accepted.
+ * Pixel-exact placement is tested separately, including unchanged on-grid y.
+ */
+const FP_TEXT_2X_BOUNDS = [0.55, 0.0058, 0.32];
+const FP_DEJAVU_2X_BOUNDS = [6.5, 0.063, 0.565];
 
 /** @return array{mae: float, mismatch: float, max: int, inkMismatch: float, pixels: int} */
 function fpGolden(string $name, int $scale, ?string $pdf = null): array
@@ -142,9 +161,11 @@ foreach (RenderFixtures::TEXT_SCALES as $name => $scales) {
 }
 
 /** [MAE, page share, inked share] bounds for a text fixture. */
-function fpTextBounds(string $name): array
+function fpTextBounds(string $name, int $scale = 1): array
 {
     return match (true) {
+        $name === 'p2-text' && $scale === 2 => FP_TEXT_2X_BOUNDS,
+        $name === 'p2-dejavu' && $scale === 2 => FP_DEJAVU_2X_BOUNDS,
         in_array($name, RenderFixtures::SNAP_IMMUNE, true) => [FP_GOLDEN_MAE, FP_GLYPHS_MISMATCH, FP_GLYPHS_INKED],
         $name === 'std14' => [FP_STD14_MAE, FP_TEXT_MISMATCH, FP_TEXT_INKED],
         default => [FP_TEXT_MAE, FP_TEXT_MISMATCH, FP_TEXT_INKED],
@@ -152,16 +173,16 @@ function fpTextBounds(string $name): array
 }
 
 /** Whether a comparison falls outside a text fixture's bounds. */
-function fpTextFails(array $d, string $name): bool
+function fpTextFails(array $d, string $name, int $scale = 1): bool
 {
-    [$mae, $mis, $inked] = fpTextBounds($name);
+    [$mae, $mis, $inked] = fpTextBounds($name, $scale);
 
     return $d['mae'] > $mae || $d['mismatch'] > $mis || $d['inkedMismatch'] > $inked;
 }
 
 it('draws text as Chromium does, within the text tolerance', function (string $name, int $scale) {
     $d = fpGolden($name, $scale);
-    [$mae, $mis, $inked] = fpTextBounds($name);
+    [$mae, $mis, $inked] = fpTextBounds($name, $scale);
 
     expect($d['mae'])->toBeLessThanOrEqual($mae, sprintf('%s@%dx MAE %.3f', $name, $scale, $d['mae']))
         ->and($d['mismatch'])->toBeLessThanOrEqual($mis, sprintf('%s@%dx mismatched %.3f%%', $name, $scale, $d['mismatch'] * 100))
@@ -185,10 +206,11 @@ it('draws a real installed TrueType font as Chromium does, within the text toler
         $this->markTestSkipped($name.': this machine\'s font builds a different PDF from the one the golden was rendered from');
     }
     $d = fpGolden($name, $scale, $pdf);
+    [$mae, $mis, $inked] = fpTextBounds($name, $scale);
 
-    expect($d['mae'])->toBeLessThanOrEqual(FP_TEXT_MAE, sprintf('%s@%dx MAE %.3f', $name, $scale, $d['mae']))
-        ->and($d['mismatch'])->toBeLessThanOrEqual(FP_TEXT_MISMATCH, sprintf('%s@%dx mismatched %.3f%%', $name, $scale, $d['mismatch'] * 100))
-        ->and($d['inkedMismatch'])->toBeLessThanOrEqual(FP_TEXT_INKED, sprintf('%s@%dx inked mismatched %.3f%%', $name, $scale, $d['inkedMismatch'] * 100));
+    expect($d['mae'])->toBeLessThanOrEqual($mae, sprintf('%s@%dx MAE %.3f', $name, $scale, $d['mae']))
+        ->and($d['mismatch'])->toBeLessThanOrEqual($mis, sprintf('%s@%dx mismatched %.3f%%', $name, $scale, $d['mismatch'] * 100))
+        ->and($d['inkedMismatch'])->toBeLessThanOrEqual($inked, sprintf('%s@%dx inked mismatched %.3f%%', $name, $scale, $d['inkedMismatch'] * 100));
 })->with($localCases)->group('local');
 
 /** Our render of a text fixture made wrong on purpose: 'right1' one pixel right, or 'scale103' 3% too large. */
@@ -211,7 +233,7 @@ it('fails text that is wrong on purpose: the text bounds have teeth', function (
     $golden = PngReader::read((string) file_get_contents(dirname(__DIR__, 2)."/golden/{$name}@{$scale}x.png"));
     [$rows, $w, $h] = fpWrongText(RenderFixtures::pdf($name), $scale, $how);
 
-    expect(fpTextFails(ImageDiff::compare($rows, $golden['rgb'], $w, $h), $name))->toBeTrue();
+    expect(fpTextFails(ImageDiff::compare($rows, $golden['rgb'], $w, $h), $name, $scale))->toBeTrue();
 })->with([
     'glyphs@1x one pixel right' => ['glyphs', 1, 'right1'],
     'glyphs@2x one pixel right' => ['glyphs', 2, 'right1'],

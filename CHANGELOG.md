@@ -191,6 +191,10 @@ BREAKING and says what a consumer must do.
 
 ### Changed
 
+- Text rendering snaps each glyph origin down to the next whole device pixel
+  at every scale, as chosen by the owner. Aligned origins stay put, horizontal
+  positions and advances stay exact, and fill and stroke move together. The
+  2x text goldens now enforce tighter bounds set before the first test run.
 - **Encrypted files are no longer all refused.** One that needs a real password
   is still refused as `encrypted`, as is one using a non-standard security
   handler; a MALFORMED encryption dictionary is now `corrupt` instead of

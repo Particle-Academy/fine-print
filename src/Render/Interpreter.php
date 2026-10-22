@@ -587,7 +587,7 @@ final class Interpreter
         $this->blit($r, $evenOdd, $rgb);
     }
 
-    private function stroke(?Path $path = null, ?array $rgb = null): void
+    private function stroke(?Path $path = null, ?array $rgb = null, float $deviceYShift = 0.0): void
     {
         $path ??= $this->path;
         if ($path->isEmpty()) {
@@ -599,6 +599,7 @@ final class Interpreter
         }
         $gs = $this->gs;
         $m = $gs->ctm;
+        $m[5] += $deviceYShift;
         // How far one user unit can stretch in device space: sets the
         // flattening tolerance in user space, and the hairline width.
         $stretch = sqrt(max($m[0] * $m[0] + $m[1] * $m[1], $m[2] * $m[2] + $m[3] * $m[3]));
@@ -753,6 +754,11 @@ final class Interpreter
                 return;
             }
         }
+        // Deliberate placement policy (owner ruling 2026-10-22): move the
+        // glyph origin DOWN to the next whole device pixel. Aligned origins
+        // stay aligned; x and the text matrix's advances remain exact.
+        $deviceYShift = ceil($m[5]) - $m[5];
+        $m[5] = ceil($m[5]);
         try {
             $o = $font->outline($gid);
         } catch (FontException) {
@@ -790,7 +796,9 @@ final class Interpreter
             $this->blit($r, false, $fillRgb);
         }
         if ($strokeRgb !== null) {
-            $this->stroke(Path::fromSubpaths($o->subpaths, $g), $strokeRgb);
+            // Translate the stroker's device matrix, preserving the user-space
+            // pen shape even under rotated, skewed or singular CTMs.
+            $this->stroke(Path::fromSubpaths($o->subpaths, $g), $strokeRgb, $deviceYShift);
         }
     }
 
