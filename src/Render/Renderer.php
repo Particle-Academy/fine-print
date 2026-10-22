@@ -23,9 +23,10 @@ use InvalidArgumentException;
  * white background, as viewers show it.
  *
  * Drawn: vector paths (fills, strokes, dashes, colour, transforms, form
- * XObjects) and text in embedded TrueType fonts (P3b). NOT drawn yet, and
+ * XObjects), TrueType text (P3b), and raw/Flate/LZW image XObjects (P3c).
+ * NOT drawn yet, and
  * listed in {@see Rendering::$skipped}: text in fonts that are not embedded
- * or are CFF / Type 1 / Type 3, images, clipping, shading, patterns and
+ * or are CFF / Type 1 / Type 3, JPEG/other image codecs, inline images, clipping, shading, patterns and
  * transparency.
  *
  * Bounded by {@see Limits}: the raster's pixel count is judged before it is

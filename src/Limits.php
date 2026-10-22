@@ -49,6 +49,8 @@ final class Limits
         public readonly int $maxRenderPixels = 25_000_000,
         /** Wall-clock budget for rendering one page, from the call, in seconds. */
         public readonly float $renderTimeSeconds = 30.0,
+        /** Source pixels in one image, checked before decompression/allocation. */
+        public readonly int $maxImagePixels = 16_000_000,
     ) {}
 
     /**

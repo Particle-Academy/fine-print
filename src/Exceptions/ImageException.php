@@ -7,7 +7,7 @@ namespace FinePrint\Exceptions;
 use RuntimeException;
 
 /**
- * An image the writer was given cannot be embedded: not PNG or JPEG, damaged,
- * a JPEG flavour PDF cannot carry, or larger than the pixel limit.
+ * An image cannot be embedded or rendered: unsupported or damaged. Rendering
+ * limit breaches are RefusedException instead, and must never be swallowed.
  */
 final class ImageException extends RuntimeException {}

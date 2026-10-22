@@ -10,6 +10,12 @@ BREAKING and says what a consumer must do.
 
 ### Added
 
+- **P3c image XObjects (first step):** packed Gray/RGB/CMYK samples at
+  1/2/4/8/16 bits, Flate/LZW and PNG/TIFF predictors, Decode arrays, Indexed
+  palettes and fill-colour stencil masks, transformed with bounded
+  nearest-neighbour sampling. `maxImagePixels` defaults to 16 million,
+  checked before decoding. Unsupported/damaged images remain reported;
+  JPEG and inline-image support follow separately.
 - **A PDF reader in pure PHP**, with no runtime dependency beyond PHP's bundled
   `zlib`, `mbstring`, `ctype` and `json`. Reads the header, cross-reference
   tables and streams, hybrid files, incremental updates (newest object wins)
@@ -234,6 +240,10 @@ BREAKING and says what a consumer must do.
   for the budget to be sampled. The fixture is now deterministic.
 
 ### Security
+
+- Stream predictors validate dimensions before allocation and use packed
+  byte rows instead of PHP arrays per byte. TIFF differencing now handles
+  every PDF sample depth and predictor loops tick the supplied budget.
 
 - **`Agent::read()` crashed with a FATAL out-of-memory error on one huge show
   string** (measured 2026-10-21, PHP 8.4, `memory_limit` 512M, default

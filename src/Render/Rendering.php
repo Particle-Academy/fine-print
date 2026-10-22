@@ -18,8 +18,8 @@ namespace FinePrint\Render;
  * | `clip` | clipping (`W` / `W*`); the paint after it was drawn unclipped |
  * | `colorspace` | paint in Separation/DeviceN (drawn as grey from the tint), Lab, Indexed or unknown spaces (drawn black) |
  * | `form-depth` | form XObjects nested past `maxFormDepth`, or drawing themselves |
- * | `image` | image XObjects |
- * | `inline-image` | inline images |
+ * | `image` | damaged or unsupported image XObjects |
+ * | `inline-image` | damaged or unsupported inline images |
  * | `optional-content` | optional-content sections, drawn regardless of their visibility |
  * | `pattern` | paint with a pattern (not drawn) |
  * | `shading` | `sh` shadings |

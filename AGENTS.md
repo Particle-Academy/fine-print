@@ -17,7 +17,7 @@ is an approval request to the owner. It is never a `composer require`.
 P1 is the reader plus the security layer; P2 is the writer (`src/Writer`);
 P3a is the renderer core (`src/Render`: vector paths to PNG); P3b draws text
 from embedded TrueType fonts (`src/Render/Glyphs`). CFF / Type 1 / Type 3
-fonts, images, clipping and transparency in the renderer (P3b-d) and Laravel
+fonts, image codecs/inline images, clipping and transparency in the renderer (P3b-d) and Laravel
 serving (P4) are later. See `.ai/plans/fine-print.md` in the envelope.
 
 | layer | where | trusts its input? |
@@ -109,6 +109,19 @@ the canvas, filled nonzero glyph by glyph, stroked through the P3a stroker.
   advances come from the standard widths by character, not from the bundled
   font. Never subset, rename or edit a bundled file; replacing one means a
   new NOTICE entry and hash.
+
+## Image XObjects (P3c, first step)
+
+`Images\SampledImage` keeps packed samples, at 1/2/4/8/16 bits, with row
+padding, Decode arrays, Gray/RGB/CMYK, Indexed palettes and stencil masks.
+`ImagePainter` inverse-maps device pixel centres into the image unit square
+(nearest neighbour), so transforms do not allocate an intermediate canvas.
+`maxImagePixels` is checked on floats before decoding; decoded sample size
+is checked before integer multiplication. Filters and predictors use the
+render budget, not the document's older reading budget. Predictor rows are
+byte strings, never arrays per byte; TIFF differs by sample, not by byte.
+Unsupported/damaged images are reported as `image`; masks remain a reported
+transparency omission until P3d. JPEG and inline images are the next P3c step.
 
 ## Encryption (owner ruling 2026-10-21: open empty-password files)
 

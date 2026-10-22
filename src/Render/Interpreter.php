@@ -7,6 +7,7 @@ namespace FinePrint\Render;
 use FinePrint\Budget;
 use FinePrint\Document;
 use FinePrint\Exceptions\FontException;
+use FinePrint\Exceptions\ImageException;
 use FinePrint\Exceptions\RefusedException;
 use FinePrint\Objects\PdfDict;
 use FinePrint\Objects\PdfName;
@@ -14,6 +15,8 @@ use FinePrint\Objects\PdfRef;
 use FinePrint\Objects\PdfStream;
 use FinePrint\Objects\PdfString;
 use FinePrint\Render\Glyphs\RenderFont;
+use FinePrint\Render\Images\ImagePainter;
+use FinePrint\Render\Images\SampledImage;
 use FinePrint\Parser\InlineImage;
 use FinePrint\Parser\Keyword;
 use FinePrint\Parser\Parser;
@@ -841,7 +844,7 @@ final class Interpreter
         }
         $subtype = $x->dict->name('Subtype');
         if ($subtype === 'Image') {
-            $this->skip('image');
+            $this->image($x, $resources, 'image');
 
             return;
         }
@@ -898,6 +901,25 @@ final class Interpreter
     }
 
     // ------------------------------------------------------------------
+
+    private function image(PdfStream $stream, ?PdfDict $resources, string $kind): void
+    {
+        try {
+            $image = SampledImage::load($stream, $this->doc, $this->budget, $resources);
+            if ($stream->dict->has('SMask') || $stream->dict->has('Mask')) {
+                $this->skip('transparency');
+            }
+            $fill = $image->stencil ? $this->paint(false) : [0, 0, 0];
+            if (! $image->stencil && ($this->gs->fillAlpha < 1.0 || $this->gs->maskOrBlend)) {
+                $this->skip('transparency');
+            }
+            if ($fill !== null) {
+                ImagePainter::paint($image, $this->raster, $this->gs->ctm, $fill, $this->budget);
+            }
+        } catch (ImageException) {
+            $this->skip($kind);
+        }
+    }
 
     /**
      * The last $n operands as finite floats, or null when there are too few

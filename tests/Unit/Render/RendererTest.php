@@ -350,7 +350,7 @@ it('skips text in a font with no embedded program and says so', function () {
         ->and($r->complete())->toBeFalse();
 });
 
-it('skips images, inline images, clipping, shading and optional content, and says so', function () {
+it('reports unsupported inline images, clipping, shading and optional content', function () {
     $pdf = fprPage(
         "q 10 0 0 10 0 0 cm /Im0 Do Q\n"
         ."BI /W 2 /H 1 /BPC 8 /CS /G ID \x00EI\xFF EI\n"
@@ -365,7 +365,6 @@ it('skips images, inline images, clipping, shading and optional content, and say
 
     expect(fpSkipped($r))->toBe([
         'clip' => 1,
-        'image' => 1,
         'inline-image' => 1,
         'optional-content' => 1,
         'shading' => 1,

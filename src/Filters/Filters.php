@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace FinePrint\Filters;
 
 use FinePrint\Budget;
+use FinePrint\Exceptions\RefusedException;
 use FinePrint\Limits;
 use FinePrint\Objects\PdfDict;
 
@@ -53,8 +54,8 @@ final class Filters
 
             $in = strlen($data);
             $data = match ($name) {
-                'FlateDecode' => self::predict(self::flate($data, $budget), $p),
-                'LZWDecode' => self::predict(self::lzw($data, self::early($p), $budget), $p),
+                'FlateDecode' => self::predict(self::flate($data, $budget), $p, $budget),
+                'LZWDecode' => self::predict(self::lzw($data, self::early($p), $budget), $p, $budget),
                 'ASCII85Decode' => self::ascii85($data),
                 'ASCIIHexDecode' => self::asciiHex($data),
                 'RunLengthDecode' => self::runLength($data, $budget),
@@ -292,36 +293,70 @@ final class Filters
     }
 
     /** Undo a PNG (>= 10) or TIFF (2) predictor. */
-    private static function predict(string $data, ?PdfDict $p): string
+    private static function predict(string $data, ?PdfDict $p, Budget $budget): string
     {
         $predictor = $p?->get('Predictor');
         if (! is_int($predictor) || $predictor < 2) {
             return $data;
         }
-        $colors = max(1, (int) ($p->get('Colors') ?? 1));
-        $bpc = max(1, (int) ($p->get('BitsPerComponent') ?? 8));
-        $columns = max(1, (int) ($p->get('Columns') ?? 1));
+        $colors = $p->get('Colors') ?? 1;
+        $bpc = $p->get('BitsPerComponent') ?? 8;
+        $columns = $p->get('Columns') ?? 1;
+        if (! is_int($colors) || $colors < 1 || $colors > 32
+            || ! in_array($bpc, [1, 2, 4, 8, 16], true)
+            || ! is_int($columns) || $columns < 1
+            || ! in_array($predictor, [2, 10, 11, 12, 13, 14, 15], true)) {
+            throw new RefusedException('corrupt', 'Invalid stream predictor parameters.');
+        }
+        // Float multiplication FIRST: hostile dimensions must never overflow
+        // intdiv or allocate an attacker-sized PHP array for the previous row.
+        if (ceil((float) $colors * $bpc * $columns / 8) > min($budget->limits->maxStreamBytes, PHP_INT_MAX / 16)) {
+            throw new RefusedException('too_large', 'A predictor row exceeds the decoded stream limit.');
+        }
         $bpp = max(1, intdiv($colors * $bpc + 7, 8));
         $rowLen = intdiv($colors * $bpc * $columns + 7, 8);
 
         if ($predictor === 2) {
-            if ($bpc !== 8) {
-                return $data;
-            }
             $out = '';
-            foreach (str_split($data, $rowLen) as $row) {
-                $r = array_values(unpack('C*', $row) ?: []);
-                for ($i = $bpp, $n = count($r); $i < $n; $i++) {
-                    $r[$i] = ($r[$i] + $r[$i - $bpp]) & 0xFF;
+            $mask = (1 << $bpc) - 1;
+            for ($pos = 0, $len = strlen($data); $pos < $len; $pos += $rowLen) {
+                $row = substr($data, $pos, $rowLen);
+                $previous = array_fill(0, $colors, 0);
+                $decoded = '';
+                $acc = 0;
+                $used = 0;
+                $samples = min($colors * $columns, intdiv(strlen($row) * 8, $bpc));
+                for ($i = 0; $i < $samples; $i++) {
+                    $budget->tick();
+                    $bit = $i * $bpc;
+                    $byte = intdiv($bit, 8);
+                    $sample = $bpc === 16
+                        ? (ord($row[$byte]) << 8) | ord($row[$byte + 1])
+                        : (ord($row[$byte]) >> (8 - ($bit & 7) - $bpc)) & $mask;
+                    $value = ($sample + $previous[$i % $colors]) & $mask;
+                    $previous[$i % $colors] = $value;
+                    if ($bpc === 16) {
+                        $decoded .= pack('n', $value);
+                    } else {
+                        $acc = ($acc << $bpc) | $value;
+                        $used += $bpc;
+                        if ($used === 8) {
+                            $decoded .= chr($acc);
+                            $acc = $used = 0;
+                        }
+                    }
                 }
-                $out .= pack('C*', ...$r);
+                if ($used > 0) {
+                    $decoded .= chr($acc << (8 - $used));
+                }
+                $out .= $decoded;
             }
 
             return $out;
         }
 
         $out = '';
-        $prior = array_fill(0, $rowLen, 0);
+        $prior = '';
         $len = strlen($data);
         for ($pos = 0; $pos + 1 <= $len; $pos += $rowLen + 1) {
             $type = ord($data[$pos]);
@@ -329,23 +364,27 @@ final class Filters
             if ($row === '') {
                 break;
             }
-            $cur = array_values(unpack('C*', $row) ?: []);
-            $n = count($cur);
-            for ($i = 0; $i < $n; $i++) {
-                $left = $i >= $bpp ? $cur[$i - $bpp] : 0;
-                $up = $prior[$i];
-                $upLeft = $i >= $bpp ? $prior[$i - $bpp] : 0;
-                $v = match ($type) {
-                    1 => $cur[$i] + $left,
-                    2 => $cur[$i] + $up,
-                    3 => $cur[$i] + intdiv($left + $up, 2),
-                    4 => $cur[$i] + self::paeth($left, $up, $upLeft),
-                    default => $cur[$i],
-                };
-                $cur[$i] = $v & 0xFF;
+            if ($type > 4) {
+                throw new RefusedException('corrupt', 'Invalid PNG predictor filter.');
             }
-            $out .= pack('C*', ...$cur);
-            $prior = array_pad($cur, $rowLen, 0);
+            $n = strlen($row);
+            for ($i = 0; $i < $n; $i++) {
+                $budget->tick();
+                $left = $i >= $bpp ? ord($row[$i - $bpp]) : 0;
+                $up = isset($prior[$i]) ? ord($prior[$i]) : 0;
+                $upLeft = $i >= $bpp && isset($prior[$i - $bpp]) ? ord($prior[$i - $bpp]) : 0;
+                $raw = ord($row[$i]);
+                $v = match ($type) {
+                    1 => $raw + $left,
+                    2 => $raw + $up,
+                    3 => $raw + intdiv($left + $up, 2),
+                    4 => $raw + self::paeth($left, $up, $upLeft),
+                    default => $raw,
+                };
+                $row[$i] = chr($v & 0xFF);
+            }
+            $out .= $row;
+            $prior = $row;
         }
 
         return $out;

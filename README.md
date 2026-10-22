@@ -15,8 +15,8 @@ no third-party PDF library. Just PHP 8.4 and its bundled `zlib`, `mbstring`,
 `ctype` and `json`.
 
 > **Status: 0.x, reader and writer, plus the first steps of a page renderer.**
-> The renderer draws vector paths and text in embedded TrueType fonts so far
-> (see [Rendering pages](#rendering-pages)); other font types, images and
+> The renderer draws vector paths, TrueType text and sampled image XObjects
+> (see [Rendering pages](#rendering-pages)); other font types, image codecs and
 > clipping are later steps, and Laravel page-image serving is a later phase. Pre-1.0, breaking changes may land in a minor release; the
 > [changelog](CHANGELOG.md) marks each one.
 
@@ -347,13 +347,20 @@ PDF gives no `/Widths`, text advances by the standard 14's own widths, so it
 lands where the producer laid it out. The glyphs are these fonts' designs,
 not Adobe's, so they look close to, not identical with, another viewer's.
 
+**Image XObjects:** raw, Flate/LZW (including PNG/TIFF predictors), ASCII85,
+ASCIIHex and RunLength samples; Gray/RGB/CMYK at 1/2/4/8/16 bits, Decode
+arrays, Indexed palettes, and stencil masks in the current fill colour.
+Source row padding and PDF's top-to-bottom sample order are preserved.
+Images use nearest-neighbour sampling under any non-singular transform.
+`maxImagePixels` bounds the source image before decoding (default 16 million).
+
 **What is NOT drawn yet, and is listed in `skipped`:** text in any other font
 with no embedded program (`text-unembedded`, which includes Symbol and
 ZapfDingbats: nothing is bundled for them), in CFF
 (`text-cff`), Type 1 (`text-type1`) or Type 3 (`text-type3`) fonts, vertical
 text (`text-vertical`), predefined CJK CMaps (`text-cmap`), fonts that cannot
 be read (`text-font-invalid`) and single damaged glyphs (`text-glyph`);
-images and inline images, clipping, shadings, patterns, transparency (drawn
+JPEG/JPX/CCITT/JBIG2 or damaged images, inline images, clipping, shadings, patterns, transparency (drawn
 opaque), Separation and DeviceN colour (drawn as grey), annotation
 appearances, and optional-content visibility (everything is drawn). The
 `text-*` entries name the fonts concerned. Check `complete()` before treating a

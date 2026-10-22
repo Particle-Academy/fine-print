@@ -60,6 +60,12 @@ final class ColourSpace
         return self::fromValue(new PdfName($name), $resources, $doc, 0);
     }
 
+    /** Resolve an image's direct colour-space value or resource name. */
+    public static function fromPdf(mixed $value, ?PdfDict $resources, Document $doc): self
+    {
+        return self::fromValue($value, $resources, $doc, 0);
+    }
+
     private static function fromValue(mixed $v, ?PdfDict $resources, Document $doc, int $depth): self
     {
         $v = $doc->resolve($v);
