@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace FinePrint\Render;
 
+use FinePrint\Budget;
+
 /**
  * An opaque RGB canvas, one byte string per row (3 bytes per pixel), white
  * to start with — the page as every viewer shows it.
@@ -16,8 +18,11 @@ final class Raster
     /** @var list<string> */
     private array $rows;
 
-    public function __construct(public readonly int $width, public readonly int $height)
+    public function __construct(public readonly int $width, public readonly int $height, ?Budget $budget = null)
     {
+        // Worst-case painted rows include string/array overhead and a
+        // temporary row. Pixel count alone misses a 1 x 4,000,000 page.
+        $budget?->allocation((float) $width * $height * 3 + (float) $height * 96 + (float) $width * 3);
         $blank = str_repeat("\xFF", $width * 3);
         $this->rows = array_fill(0, $height, $blank);
     }
@@ -26,8 +31,26 @@ final class Raster
      * Paint `len` pixels of row y from x, in colour (r, g, b) at coverage a.
      * Assumes 0 <= x, x + len <= width, 0 <= y < height (the rasteriser's spans are).
      */
-    public function span(int $y, int $x, int $len, int $r, int $g, int $b, float $a): void
+    public function span(int $y, int $x, int $len, int $r, int $g, int $b, float $a, ?CoverageMask $clip = null, ?Budget $budget = null): void
     {
+        $a = max(0.0, min(1.0, $a));
+        if ($a <= 0.0) {
+            return;
+        }
+        if ($clip !== null) {
+            $mask = $clip->row($y);
+            if (strspn($mask, "\0", $x, $len) === $len) {
+                return;
+            }
+            if (strspn($mask, "\xFF", $x, $len) !== $len) {
+                for ($i = $x; $i < $x + $len; $i++) {
+                    $budget?->tick();
+                    $this->span($y, $i, 1, $r, $g, $b, $a * ord($mask[$i]) / 255);
+                }
+
+                return;
+            }
+        }
         $row = &$this->rows[$y];
         if ($a >= 0.998) {
             if ($len >= 16) {

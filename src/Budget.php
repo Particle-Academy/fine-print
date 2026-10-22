@@ -49,6 +49,37 @@ final class Budget
         if (memory_get_usage() - $this->memoryStart > $this->limits->memoryBytes) {
             throw new RefusedException('memory_budget', $this->activity.' needed more than the '.$this->limits->memoryBytes.'-byte memory budget.');
         }
+        $hard = $this->hardMemoryLimit();
+        if ($hard !== null && memory_get_usage(true) + 2 * 1024 * 1024 > $hard) {
+            throw new RefusedException('memory_budget', $this->activity.' is too close to the PHP memory limit.');
+        }
+    }
+
+    /** Judge a worst-case allocation BEFORE PHP attempts it (includes arena headroom). */
+    public function allocation(float|int $bytes): void
+    {
+        $this->check();
+        $growth = memory_get_usage() - $this->memoryStart;
+        $hard = $this->hardMemoryLimit();
+        if (! is_finite((float) $bytes) || $bytes < 0 || $bytes > $this->limits->memoryBytes - $growth
+            || ($hard !== null && $bytes > $hard - memory_get_usage(true) - 2 * 1024 * 1024)) {
+            throw new RefusedException('memory_budget', $this->activity.' would exceed the available memory during allocation.');
+        }
+    }
+
+    private function hardMemoryLimit(): ?int
+    {
+        $raw = trim((string) ini_get('memory_limit'));
+        if ((float) $raw <= 0) {
+            return null;
+        }
+        $factor = match (strtolower(substr($raw, -1))) {
+            'k' => 1024, 'm' => 1024 * 1024, 'g' => 1024 * 1024 * 1024, default => 1,
+        };
+
+        $bytes = (float) $raw * $factor;
+
+        return $bytes >= (float) PHP_INT_MAX ? PHP_INT_MAX : (int) $bytes;
     }
 
     /**

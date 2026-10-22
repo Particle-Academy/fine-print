@@ -30,6 +30,8 @@ final class SampledImage
         public readonly bool $stencil,
         private readonly ?string $palette,
         private readonly int $hival,
+        private readonly ?self $alpha = null,
+        private readonly ?array $colourKey = null,
     ) {}
 
     public static function dimensions(mixed $width, mixed $height, Budget $budget): void
@@ -43,9 +45,12 @@ final class SampledImage
         $budget->check();
     }
 
-    public static function load(PdfStream $stream, Document $doc, Budget $budget, ?PdfDict $resources): self
+    public static function load(PdfStream $stream, Document $doc, Budget $budget, ?PdfDict $resources, bool $allowMasks = true): self
     {
         $d = $stream->dict;
+        if (! $allowMasks && ($d->has('SMask') || $d->has('Mask'))) {
+            throw new ImageException('Nested or recursive image masks are unsupported.');
+        }
         $get = fn (string $key) => $doc->resolve($d->get($key));
         $w = $get('Width');
         $h = $get('Height');
@@ -67,7 +72,7 @@ final class SampledImage
         $hival = 0;
         if (! $mask && is_array($value) && ($doc->resolve($value[0] ?? null) instanceof PdfName)
             && in_array($doc->resolve($value[0])->value, ['Indexed', 'I'], true)) {
-            $space = ColourSpace::fromPdf($value[1] ?? null, $resources, $doc);
+            $space = ColourSpace::fromPdf($value[1] ?? null, $resources, $doc, $budget);
             $hival = $doc->resolve($value[2] ?? null);
             $lookup = $doc->resolve($value[3] ?? null);
             if (! is_int($hival) || $hival < 0 || $hival > 255) {
@@ -80,9 +85,9 @@ final class SampledImage
                 throw new ImageException('Truncated image palette.');
             }
         } else {
-            $space = $mask ? ColourSpace::gray() : ColourSpace::fromPdf($value, $resources, $doc);
+            $space = $mask ? ColourSpace::gray() : ColourSpace::fromPdf($value, $resources, $doc, $budget);
         }
-        if (! in_array($space->kind, ['gray', 'rgb', 'cmyk'], true)) {
+        if (! in_array($space->kind, ['gray', 'rgb', 'cmyk', 'alternate'], true)) {
             throw new ImageException('Unsupported image colour space.');
         }
         $components = $palette !== null ? 1 : $space->components;
@@ -107,6 +112,11 @@ final class SampledImage
             }
         }
         unset($number);
+        for ($i = 0; $i < count($decode); $i += 2) {
+            if (! is_finite($decode[$i + 1] - $decode[$i])) {
+                throw new ImageException('Image Decode endpoints overflow.');
+            }
+        }
         $jpeg = null;
         $data = self::stream($stream, $doc, $budget, $jpeg);
         if ($jpeg !== null && ($bits !== 8 || $jpeg !== [$w, $h, $components] || $mask || $palette !== null)) {
@@ -116,7 +126,40 @@ final class SampledImage
             throw new ImageException('Image sample length does not match its dimensions.');
         }
 
-        return new self($w, $h, $bits, $components, $data, $space, $decode, $mask, $palette, $hival);
+        $alpha = null;
+        $key = null;
+        $soft = $get('SMask');
+        if ($d->has('SMask') && ! ($soft instanceof PdfName && $soft->value === 'None')) {
+            if (! $soft instanceof PdfStream || $mask || $soft->dict->has('Matte')) {
+                throw new ImageException('Unsupported or invalid image soft mask.');
+            }
+            $alpha = self::load($soft, $doc, $budget, $resources, false);
+            if ($alpha->stencil || $alpha->space->kind !== 'gray' || $alpha->components !== 1) {
+                throw new ImageException('An image soft mask must be grayscale.');
+            }
+        } elseif ($d->has('Mask')) {
+            $value = $get('Mask');
+            if ($mask) {
+                throw new ImageException('A stencil cannot carry another image mask.');
+            }
+            if ($value instanceof PdfStream) {
+                $alpha = self::load($value, $doc, $budget, $resources, false);
+                if (! $alpha->stencil) {
+                    throw new ImageException('An explicit image mask must be a stencil.');
+                }
+            } elseif (is_array($value) && count($value) === 2 * $components) {
+                $key = array_map(fn ($v) => $doc->resolve($v), $value);
+                foreach ($key as $i => $v) {
+                    if (! is_int($v) || $v < 0 || $v > (1 << $bits) - 1 || ($i % 2 === 1 && $v < $key[$i - 1])) {
+                        throw new ImageException('Invalid image colour-key mask.');
+                    }
+                }
+            } else {
+                throw new ImageException('Invalid image mask.');
+            }
+        }
+
+        return new self($w, $h, $bits, $components, $data, $space, $decode, $mask, $palette, $hival, $alpha, $key);
     }
 
     /** Decode with the RENDER budget, including indirect filter parameters. */
@@ -173,6 +216,7 @@ final class SampledImage
         $offset = $y * $rowBits + $x * $this->components * $this->bits;
         $max = (1 << $this->bits) - 1;
         $values = [];
+        $masked = $this->colourKey !== null;
         for ($c = 0; $c < $this->components; $c++) {
             $byte = intdiv($offset, 8);
             $sample = match ($this->bits) {
@@ -180,8 +224,14 @@ final class SampledImage
                 8 => ord($this->data[$byte]),
                 default => (ord($this->data[$byte]) >> (8 - ($offset & 7) - $this->bits)) & $max,
             };
+            if ($this->colourKey !== null && ($sample < $this->colourKey[2 * $c] || $sample > $this->colourKey[2 * $c + 1])) {
+                $masked = false;
+            }
             $values[] = $this->decode[2 * $c] + $sample / $max * ($this->decode[2 * $c + 1] - $this->decode[2 * $c]);
             $offset += $this->bits;
+        }
+        if ($masked) {
+            return null;
         }
         if ($this->stencil) {
             return $values[0] < 0.5 ? $fill : null;
@@ -201,5 +251,18 @@ final class SampledImage
     public static function placeholder(): self
     {
         return new self(2, 2, 8, 1, "\xE0\xC0\xC0\xE0", ColourSpace::gray(), [0.0, 1.0], false, null, 0);
+    }
+
+    /** Normalised image coordinates, independent of the base image resolution. */
+    public function opacity(float $u, float $v): float
+    {
+        if ($this->alpha === null) {
+            return 1.0;
+        }
+        $x = max(0, min($this->alpha->width - 1, (int) floor($u * $this->alpha->width)));
+        $y = max(0, min($this->alpha->height - 1, (int) floor($v * $this->alpha->height)));
+        $pixel = $this->alpha->pixel($x, $y, [0, 0, 0]);
+
+        return $this->alpha->stencil ? ($pixel !== null ? 1.0 : 0.0) : ($pixel[0] ?? 0) / 255;
     }
 }

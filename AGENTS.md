@@ -15,10 +15,10 @@ FPDF, TCPDF or dompdf, and no shelling out to a binary. Needing anything else
 is an approval request to the owner. It is never a `composer require`.
 
 P1 is the reader plus the security layer; P2 is the writer (`src/Writer`);
-P3a is the renderer core (`src/Render`: vector paths to PNG); P3b draws text
-from embedded TrueType fonts (`src/Render/Glyphs`). CFF / Type 1 / Type 3
-fonts, clipping and transparency in the renderer (P3b-d) and Laravel
-serving (P4) are later. See `.ai/plans/fine-print.md` in the envelope.
+P3a is the renderer core (`src/Render`: vector paths to PNG); P3b draws
+TrueType text (`src/Render/Glyphs`); P3c adds sampled/JPEG images; P3d adds
+clipping, alpha and tint functions. CFF / Type 1 / Type 3 fonts, advanced
+transparency and Laravel serving (P4) are later. See the envelope plan.
 
 | layer | where | trusts its input? |
 |---|---|---|
@@ -121,7 +121,8 @@ is checked before integer multiplication. Filters and predictors use the
 render budget, not the document's older reading budget. Predictor rows are
 byte strings, never arrays per byte; TIFF differs by sample, not by byte.
 Unsupported/damaged images paint a checkerboard and are reported as `image`
-or `inline-image`; masks remain a reported transparency omission until P3d.
+or `inline-image`. Gray soft masks, explicit stencils and colour-key masks
+are supported; nested masks and `/Matte` preblending remain reported placeholders.
 
 `InlineImageReader` expands only inline aliases and finds raw sample lengths
 or encoded stream boundaries (Flate, LZW EOD, ASCII terminators, RunLength
@@ -138,6 +139,28 @@ never exposed. Adobe APP14 overrides PDF ColorTransform (ISO 32000-1 table 13);
 YCbCr/YCCK conversion happens before the PDF Decode array. CMYK inversion is
 the Decode array's job, as P2 writes it. Progressive/arithmetic/lossless JPEG,
 JPX, JBIG2 and CCITT are reported placeholders, not silently complete.
+
+## Clipping, transparency and tint functions (P3d)
+
+- `CoverageMask` is immutable byte coverage, shared by cloned graphics states.
+  W/W* is deferred until the path is painted or discarded. Form BBox clips
+  locally; text outlines union through a BT/ET pair and intersect at ET.
+- Every vector/image paint multiplies coverage by the appropriate CA/ca.
+  Soft masks sample normalised coordinates at their own resolution; explicit
+  stencils preserve zero-bit opacity; colour keys compare BEFORE Decode.
+- `TintFunction` handles type 2 exponentials and type 0 multilinear samples
+  (up to four inputs/outputs, every PDF sample depth). Size is judged before
+  decoding, interpolation work is weighted into the render budget. Calculator
+  functions and cubic sampled interpolation remain reported approximations.
+- Blend modes, ExtGState soft-mask groups and Form transparency groups remain
+  reported approximations. Never remove their skipped entry just because a
+  constant alpha or image SMask is supported.
+- `Budget::allocation` judges worst-case bytes BEFORE allocation, including
+  per-row string/array overhead and PHP memory_limit headroom. Raster, clip
+  masks and JPEG planes all use it. A thin/tall page can pass a pixel cap yet
+  exhaust row-array memory; child-process tests reproduce both that and a
+  physical PHP limit breach. Conservative capacity checks may refuse a sparse
+  raster whose initial shared blank rows would have been smaller.
 
 ## Encryption (owner ruling 2026-10-21: open empty-password files)
 

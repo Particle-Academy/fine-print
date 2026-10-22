@@ -182,14 +182,14 @@ it('skips painting with a pattern and reports it', function () {
         ->and(fpSkipped($r))->toBe(['pattern' => 1]);
 });
 
-it('approximates a Separation colour as grey and reports it', function () {
+it('renders a Separation colour through its CMYK alternate', function () {
     $r = fpRender(fprPage(
         '/Sp cs 1 sc 0 0 100 100 re f',
         resources: '/ColorSpace << /Sp [/Separation /Spot /DeviceCMYK << /FunctionType 2 /Domain [0 1] /C0 [0 0 0 0] /C1 [0 0 0 1] /N 1 >>] >>',
     ));
 
     expect(fpPx($r, 50, 50))->toBe(FP_BLACK)
-        ->and(fpSkipped($r))->toBe(['colorspace' => 1]);
+        ->and(fpSkipped($r))->toBe([]);
 });
 
 // --- graphics state -----------------------------------------------------------
@@ -236,13 +236,13 @@ it('applies line width, cap and dash from an ExtGState', function () {
         ->and(fpPx($r, 50, 56))->toBe(FP_WHITE);
 });
 
-it('reports transparency it does not apply', function () {
+it('applies constant transparency', function () {
     $r = fpRender(fprPage(
         '/GS0 gs 0 0 100 100 re f',
         resources: '/ExtGState << /GS0 << /ca 0.5 >> >>',
     ));
 
-    expect(fpSkipped($r))->toBe(['transparency' => 1]);
+    expect(fpSkipped($r))->toBe([])->and(fpPx($r, 50, 50))->toBe([128, 128, 128]);
 });
 
 // --- paths and painting ---------------------------------------------------------
@@ -350,27 +350,26 @@ it('skips text in a font with no embedded program and says so', function () {
         ->and($r->complete())->toBeFalse();
 });
 
-it('reports unsupported inline images, clipping, shading and optional content', function () {
+it('reports unsupported inline images, shading and optional content', function () {
     $pdf = fprPage(
         "q 10 0 0 10 0 0 cm /Im0 Do Q\n"
         ."BI /W 2 /H 1 /BPC 8 /CS /G ID \x00EI\xFF EI\n"
         ."0 0 50 50 re W n\n"
         ."/Sh0 sh\n"
         ."/OC /L1 BDC 0 0 10 10 re f EMC\n"
-        ."1 0 0 rg 60 60 10 10 re f\n",
+        ."1 0 0 rg 20 20 10 10 re f\n",
         resources: '/XObject << /Im0 6 0 R >>',
         extra: fn (PdfBuilder $b) => $b->stream("\x00\x00\x00", '/Type /XObject /Subtype /Image /Width 1 /Height 1 /BitsPerComponent 8 /ColorSpace /DeviceRGB'),
     );
     $r = fpRender($pdf);
 
     expect(fpSkipped($r))->toBe([
-        'clip' => 1,
         'inline-image' => 1,
         'optional-content' => 1,
         'shading' => 1,
     ])
         // The inline image's data (which holds "EI") did not derail the operators after it.
-        ->and(fpPx($r, 65, 35))->toBe([255, 0, 0]);
+        ->and(fpPx($r, 25, 75))->toBe([255, 0, 0]);
 });
 
 it('reports annotations whose appearance it does not draw', function () {
@@ -384,10 +383,10 @@ it('reports annotations whose appearance it does not draw', function () {
 });
 
 it('lists skipped kinds in a stable order with counts', function () {
-    $r = fpRender(fprPage("/Sh0 sh /Sh0 sh 0 0 1 1 re W n"));
+    $r = fpRender(fprPage("/Sh0 sh /Sh0 sh /Pattern cs /No scn 0 0 1 1 re f 0 0 1 1 re W n"));
 
     expect($r->skipped)->toBe([
-        ['kind' => 'clip', 'count' => 1],
+        ['kind' => 'pattern', 'count' => 1],
         ['kind' => 'shading', 'count' => 2],
     ]);
 });

@@ -533,7 +533,7 @@ final class Document
     /**
      * A stream's decoded bytes, or null when it is image-encoded (opaque).
      */
-    public function streamData(PdfStream $s): ?string
+    public function streamData(PdfStream $s, ?Budget $budget = null): ?string
     {
         $filter = $this->resolve($s->dict->get('Filter'));
         $parms = $this->resolve($s->dict->get('DecodeParms'));
@@ -551,7 +551,7 @@ final class Document
         }
 
         try {
-            return Filters::decodeChain($names, $s->raw, $plist, $this->budget);
+            return Filters::decodeChain($names, $s->raw, $plist, $budget ?? $this->budget);
         } catch (OpaqueStreamException) {
             return null;
         }

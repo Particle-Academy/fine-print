@@ -7,7 +7,7 @@ namespace FinePrint\Render;
 /**
  * One rendered page: the raster, its size, and what was NOT drawn.
  *
- * `skipped` is the honest part. P3a draws vector paths only; anything else
+ * `skipped` is the honest part. Anything not drawn faithfully
  * on the page is counted here by kind, so a caller can tell a complete
  * picture from a partial one instead of trusting pixels that are missing
  * content. Kinds, in the order they are listed (alphabetical):
@@ -15,8 +15,8 @@ namespace FinePrint\Render;
  * | kind | what was not drawn |
  * |---|---|
  * | `annotation` | annotations with an appearance stream (viewers draw them) |
- * | `clip` | clipping (`W` / `W*`); the paint after it was drawn unclipped |
- * | `colorspace` | paint in Separation/DeviceN (drawn as grey from the tint), Lab, Indexed or unknown spaces (drawn black) |
+ * | `clip` | clipping from undrawable text or an invalid/missing Form BBox |
+ * | `colorspace` | unsupported Separation/DeviceN tint functions (grey), Lab/Indexed vector paint or unknown spaces (black) |
  * | `form-depth` | form XObjects nested past `maxFormDepth`, or drawing themselves |
  * | `image` | damaged or unsupported image XObjects |
  * | `inline-image` | damaged or unsupported inline images |
@@ -31,16 +31,15 @@ namespace FinePrint\Render;
  * | `text-type3` | text in a Type 3 font |
  * | `text-unembedded` | text in a font with no program in the file that no bundled font stands in for (Symbol, ZapfDingbats, any non-standard face) |
  * | `text-vertical` | vertical text (Identity-V, WMode 1) |
- * | `transparency` | paint under constant alpha, a soft mask or a blend mode (drawn opaque) |
+ * | `transparency` | unsupported Form groups, ExtGState soft masks or blend modes (approximated) |
  *
  * Counts are per operator (or per annotation): `text-unembedded: 12` is
  * twelve show operators, not twelve characters. `text-glyph` counts glyphs.
  * The `text-*` kinds also carry `fonts`: the fonts concerned (at most 16),
  * by BaseFont name stripped to PostScript name characters.
  *
- * Text in clipping render modes 4-6 is painted and its clip counted under
- * `clip`; mode 7 paints nothing and counts `clip`. Mode 3 (invisible) is
- * drawn correctly by drawing nothing, and is not a skip.
+ * Supported text in modes 4-6 is painted and accumulated as a clip until ET;
+ * mode 7 only clips. Invisible mode 3 correctly paints nothing, without a skip.
  */
 final class Rendering
 {

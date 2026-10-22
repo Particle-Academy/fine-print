@@ -5,12 +5,13 @@ declare(strict_types=1);
 namespace FinePrint\Render\Images;
 
 use FinePrint\Budget;
+use FinePrint\Render\CoverageMask;
 use FinePrint\Render\Raster;
 
 /** Inverse-map device pixel centres into the image's PDF unit square. */
 final class ImagePainter
 {
-    public static function paint(SampledImage $image, Raster $raster, array $m, array $fill, Budget $budget): void
+    public static function paint(SampledImage $image, Raster $raster, array $m, array $fill, Budget $budget, ?CoverageMask $clip = null, float $alpha = 1.0): void
     {
         [$a, $b, $c, $d, $e, $f] = $m;
         $det = $a * $d - $b * $c;
@@ -37,7 +38,8 @@ final class ImagePainter
                 $sy = min($image->height - 1, (int) floor((1 - $v) * $image->height));
                 $rgb = $image->pixel($sx, $sy, $fill);
                 if ($rgb !== null) {
-                    $raster->span($y, $x, 1, ...[...$rgb, 1.0]);
+                    $opacity = $alpha * $image->opacity($u, 1 - $v) * ($clip?->at($x, $y) ?? 1.0);
+                    $raster->span($y, $x, 1, ...[...$rgb, $opacity]);
                 }
             }
         }

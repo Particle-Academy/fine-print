@@ -40,12 +40,16 @@ final class GraphicsState
 
     public float $dashPhase = 0.0;
 
-    /** Constant alpha (CA / ca) and soft masks / blend modes: P3d. Tracked so a paint can say it ignored them. */
+    /** Supported constant alpha; unsupported soft-mask groups/blend modes are reported. */
     public float $strokeAlpha = 1.0;
 
     public float $fillAlpha = 1.0;
 
-    public bool $maskOrBlend = false;
+    public bool $unsupportedMask = false;
+
+    public bool $unsupportedBlend = false;
+
+    public ?CoverageMask $clip = null;
 
     // --- text state (ISO 32000-1 9.3), saved by q like the rest ------------
 

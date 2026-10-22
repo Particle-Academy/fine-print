@@ -101,11 +101,11 @@ it('reports truncated images and unsupported codecs without presenting the page 
     'chained opaque' => ['x', '/Filter [/JPXDecode /DCTDecode]'],
 ]);
 
-it('reports an unimplemented image soft mask', function () {
+it('applies a grayscale image soft mask', function () {
     $r = Renderer::render(fpiPage("\xFF\x00\x00", '/Width 1 /Height 1 /BitsPerComponent 8 /ColorSpace /DeviceRGB /SMask 7 0 R', extra: function (PdfBuilder $b) {
         $b->stream("\x80", '/Subtype /Image /Width 1 /Height 1 /BitsPerComponent 8 /ColorSpace /DeviceGray');
     }));
-    expect($r->complete())->toBeFalse()->and(array_column($r->skipped, 'kind'))->toContain('transparency');
+    expect($r->complete())->toBeTrue()->and($r->pixel(20, 20))->toBe([255, 127, 127]);
 });
 
 it('paints a visible placeholder for an unsupported codec and reports the omission', function () {
@@ -121,10 +121,16 @@ it('renders the writer own PNG image output', function () {
     expect($r->complete())->toBeTrue();
 });
 
-it('reports ignored graphics-state alpha on an ordinary image', function () {
+it('applies graphics-state alpha to an ordinary image', function () {
     $pdf = fprPage('/Half gs 20 0 0 20 10 10 cm /Im Do', '[0 0 40 40]', '', '/XObject << /Im 6 0 R >> /ExtGState << /Half << /ca 0.5 >> >>', function (PdfBuilder $b) {
         $b->stream("\xFF\x00\x00", '/Subtype /Image /Width 1 /Height 1 /BitsPerComponent 8 /ColorSpace /DeviceRGB');
     });
     $r = Renderer::render($pdf);
-    expect($r->complete())->toBeFalse()->and(array_column($r->skipped, 'kind'))->toContain('transparency');
+    expect($r->complete())->toBeTrue()->and($r->pixel(20, 20))->toBe([255, 128, 128]);
+});
+
+it('reports Decode endpoints whose difference overflows despite each endpoint being finite', function () {
+    $large = '1'.str_repeat('0', 308);
+    $r = Renderer::render(fpiPage("\0", '/Width 1 /Height 1 /BitsPerComponent 8 /ColorSpace /DeviceGray /Decode ['.$large.' -'.$large.']'));
+    expect($r->complete())->toBeFalse()->and(array_column($r->skipped, 'kind'))->toContain('image');
 });

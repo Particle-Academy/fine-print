@@ -23,11 +23,12 @@ use InvalidArgumentException;
  * white background, as viewers show it.
  *
  * Drawn: vector paths (fills, strokes, dashes, colour, transforms, form
- * XObjects), TrueType text (P3b), sampled and baseline JPEG images (P3c).
+ * XObjects), TrueType text, sampled/baseline JPEG images, clipping, constant
+ * alpha, image masks and sampled/exponential alternate-colour tint functions.
  * NOT drawn yet, and
  * listed in {@see Rendering::$skipped}: text in fonts that are not embedded
- * or are CFF / Type 1 / Type 3, unsupported image codecs, clipping, shading, patterns and
- * transparency.
+ * or are CFF / Type 1 / Type 3, unsupported image codecs, shading, patterns,
+ * transparency groups, blend modes and ExtGState soft masks.
  *
  * Bounded by {@see Limits}: the raster's pixel count is judged before it is
  * allocated (`maxRenderPixels`), every operator counts (`maxOperators`), forms
@@ -125,7 +126,7 @@ final class Renderer
 
         $budget = new Budget($limits->with(['timeSeconds' => $limits->renderTimeSeconds]), 'Rendering');
         $content = $doc->pageContents($number);
-        $raster = new Raster($w, $h);
+        $raster = new Raster($w, $h, $budget);
         $budget->check();
 
         $interp = new Interpreter($doc, $raster, $budget, $base);

@@ -10,6 +10,12 @@ BREAKING and says what a consumer must do.
 
 ### Added
 
+- **P3d clipping and transparency subset:** nonzero/even-odd path clips,
+  Form BBox, text clips accumulated through ET, constant CA/ca, grayscale
+  image soft masks, explicit stencil and colour-key masks. Separation/DeviceN
+  uses type 2 exponential or type 0 multilinear sampled tint transforms
+  (up to four inputs/outputs, all PDF sample depths). Unsupported groups,
+  blend modes, calculator functions and advanced masks remain reported.
 - **P3c inline images and our own baseline JPEG decoder:** Huffman DC/AC,
   dequantisation/IDCT, Gray/RGB/YCbCr/CMYK/YCCK, subsampling, separate scans,
   restart markers and byte stuffing. Adobe APP14 overrides ColorTransform;
@@ -246,6 +252,11 @@ BREAKING and says what a consumer must do.
 
 ### Security
 
+- Preallocation memory checks include raster/clip row overhead, JPEG working
+  planes and PHP's physical memory limit. Two constrained child-process
+  regressions now refuse cleanly instead of exiting 255 on a fatal OOM.
+  Saved clipping masks are budgeted; nested image masks cannot recurse;
+  sampled-function sizes precede decoding; Decode endpoint overflow is reported.
 - JPEG frame dimensions and padded component-plane bytes are bounded before
   allocation. Malformed tables, scans, runs, selectors and entropy stop cleanly;
   decoder and inline-boundary loops use the render budget. Invalid filter

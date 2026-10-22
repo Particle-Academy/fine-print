@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace FinePrint\Render;
 
 use FinePrint\Document;
+use FinePrint\Budget;
 use FinePrint\Objects\PdfDict;
 use FinePrint\Objects\PdfName;
 use FinePrint\Objects\PdfStream;
@@ -24,6 +25,8 @@ final class ColourSpace
     private function __construct(
         public readonly string $kind,
         public readonly int $components,
+        private readonly ?self $alternate = null,
+        private readonly ?TintFunction $function = null,
     ) {}
 
     public static function gray(): self
@@ -47,7 +50,7 @@ final class ColourSpace
         return match ($this->kind) {
             'rgb' => [0.0, 0.0, 0.0],
             'cmyk' => [0.0, 0.0, 0.0, 1.0],
-            'approx' => array_fill(0, $this->components, 1.0),
+            'approx', 'alternate' => array_fill(0, $this->components, 1.0),
             default => array_fill(0, max(1, $this->components), 0.0),
         };
     }
@@ -55,19 +58,20 @@ final class ColourSpace
     /**
      * Resolve a `cs` / `CS` operand.
      */
-    public static function resolve(string $name, ?PdfDict $resources, Document $doc): self
+    public static function resolve(string $name, ?PdfDict $resources, Document $doc, ?Budget $budget = null): self
     {
-        return self::fromValue(new PdfName($name), $resources, $doc, 0);
+        return self::fromValue(new PdfName($name), $resources, $doc, 0, $budget);
     }
 
     /** Resolve an image's direct colour-space value or resource name. */
-    public static function fromPdf(mixed $value, ?PdfDict $resources, Document $doc): self
+    public static function fromPdf(mixed $value, ?PdfDict $resources, Document $doc, ?Budget $budget = null): self
     {
-        return self::fromValue($value, $resources, $doc, 0);
+        return self::fromValue($value, $resources, $doc, 0, $budget);
     }
 
-    private static function fromValue(mixed $v, ?PdfDict $resources, Document $doc, int $depth): self
+    private static function fromValue(mixed $v, ?PdfDict $resources, Document $doc, int $depth, ?Budget $budget = null): self
     {
+        $budget ??= $doc->budget();
         $v = $doc->resolve($v);
         if ($depth > 4) {
             return new self('unsupported', 1);
@@ -87,7 +91,7 @@ final class ColourSpace
             }
             $named = $resources !== null ? $doc->resolve($resources->get('ColorSpace')) : null;
             if ($depth === 0 && $named instanceof PdfDict && $named->has($v->value)) {
-                return self::fromValue($named->get($v->value), null, $doc, $depth + 1);
+                return self::fromValue($named->get($v->value), null, $doc, $depth + 1, $budget);
             }
 
             return new self('unsupported', 1);
@@ -117,14 +121,16 @@ final class ColourSpace
                 }
 
                 return $stream instanceof PdfStream && $stream->dict->has('Alternate')
-                    ? self::fromValue($stream->dict->get('Alternate'), null, $doc, $depth + 1)
+                    ? self::fromValue($stream->dict->get('Alternate'), null, $doc, $depth + 1, $budget)
                     : new self('unsupported', 1);
-            case 'Separation':
-                return new self('approx', 1);
-            case 'DeviceN':
+            case 'Separation': case 'DeviceN':
                 $names = $doc->resolve($v[1] ?? null);
+                $inputs = $family === 'Separation' ? 1 : (is_array($names) ? max(1, min(32, count($names))) : 1);
+                $alt = self::fromValue($v[2] ?? null, $resources, $doc, $depth + 1, $budget);
+                $function = in_array($alt->kind, ['gray', 'rgb', 'cmyk'], true)
+                    ? TintFunction::load($v[3] ?? null, $doc, $budget, $inputs, $alt->components) : null;
 
-                return new self('approx', is_array($names) ? max(1, min(32, count($names))) : 1);
+                return $function !== null ? new self('alternate', $inputs, $alt, $function) : new self('approx', $inputs);
             case 'Pattern':
                 return new self('pattern', 0);
             case 'Indexed': case 'I':
@@ -133,7 +139,7 @@ final class ColourSpace
                 return new self('unsupported', 3);
         }
 
-        return self::fromValue($v[0], null, $doc, $depth + 1);
+        return self::fromValue($v[0], null, $doc, $depth + 1, $budget);
     }
 
     /**
@@ -146,6 +152,8 @@ final class ColourSpace
     {
         $f = static fn (float $v): int => (int) round(max(0.0, min(1.0, $v)) * 255);
         switch ($this->kind) {
+            case 'alternate':
+                return $this->alternate->toRgb($this->function->evaluate($c));
             case 'gray':
                 $g = $f($c[0] ?? 0.0);
 

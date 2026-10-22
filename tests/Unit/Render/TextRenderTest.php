@@ -270,21 +270,21 @@ it('draws nothing in mode 3 (invisible), and that is not a skip', function () {
         ->and($r->skipped)->toBe([]);
 });
 
-it('paints in the clipping modes 4-6 and reports the clip as skipped; draws nothing in mode 7', function () {
+it('paints in clipping modes 4-6 and only clips in mode 7', function () {
     $four = fptRender('BT /T1 40 Tf 4 Tr 10 10 Td (I) Tj (I) Tj ET');
     $five = fptRender('2 w BT /T1 40 Tf 5 Tr 10 10 Td (I) Tj ET');
     $six = fptRender('2 w BT /T1 40 Tf 6 Tr 10 10 Td (I) Tj ET');
     $seven = fptRender('BT /T1 40 Tf 7 Tr 10 10 Td (I) Tj ET');
 
     expect(fptAt($four, 30, 30))->toBe(FPT_K)
-        ->and(fptSkipped($four))->toBe(['clip' => 2])
+        ->and(fptSkipped($four))->toBe([])
         ->and(fptAt($five, 30, 30))->toBe(FPT_W)
         ->and(fptAt($five, 10, 30))->toBe(FPT_K)
-        ->and(fptSkipped($five))->toBe(['clip' => 1])
+        ->and(fptSkipped($five))->toBe([])
         ->and(fptAt($six, 30, 30))->toBe(FPT_K)
-        ->and(fptSkipped($six))->toBe(['clip' => 1])
+        ->and(fptSkipped($six))->toBe([])
         ->and(fptAt($seven, 30, 30))->toBe(FPT_W)
-        ->and(fptSkipped($seven))->toBe(['clip' => 1]);
+        ->and(fptSkipped($seven))->toBe([]);
 });
 
 // --- glyph selection: simple fonts --------------------------------------------------

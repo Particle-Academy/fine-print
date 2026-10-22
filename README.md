@@ -17,7 +17,7 @@ no third-party PDF library. Just PHP 8.4 and its bundled `zlib`, `mbstring`,
 > **Status: 0.x, reader and writer, plus the first steps of a page renderer.**
 > The renderer draws vector paths, TrueType text and sampled image XObjects
 > (see [Rendering pages](#rendering-pages)); other font types, advanced image codecs and
-> clipping are later steps, and Laravel page-image serving is a later phase. Pre-1.0, breaking changes may land in a minor release; the
+> advanced transparency are later steps, and Laravel page-image serving is a later phase. Pre-1.0, breaking changes may land in a minor release; the
 > [changelog](CHANGELOG.md) marks each one.
 
 ## Why
@@ -359,6 +359,13 @@ JPEG is decoded by our own Huffman/IDCT engine, including grayscale,
 YCbCr/RGB, CMYK/YCCK, subsampling, restarts and separate sequential scans.
 Adobe markers and PDF ColorTransform/Decode settings are respected.
 
+**Clipping and transparency:** nonzero/even-odd path clips, Form BBox and
+text clipping modes; constant fill/stroke alpha; image soft masks, explicit
+stencil masks and colour-key masks. Text clips accumulate until `ET`; path
+clips begin after painting the current path. Separation/DeviceN colours use
+their alternate space for exponential or multilinear sampled tint functions
+(up to four inputs/outputs). Calculator functions remain unsupported.
+
 **What is NOT drawn yet, and is listed in `skipped`:** text in any other font
 with no embedded program (`text-unembedded`, which includes Symbol and
 ZapfDingbats: nothing is bundled for them), in CFF
@@ -366,8 +373,9 @@ ZapfDingbats: nothing is bundled for them), in CFF
 text (`text-vertical`), predefined CJK CMaps (`text-cmap`), fonts that cannot
 be read (`text-font-invalid`) and single damaged glyphs (`text-glyph`);
 Progressive/arithmetic/lossless JPEG, JPX/CCITT/JBIG2 or damaged images (drawn
-as checkerboard placeholders), clipping, shadings, patterns, transparency (drawn
-opaque), Separation and DeviceN colour (drawn as grey), annotation
+as checkerboard placeholders), shadings, patterns, blend modes and transparency
+groups/ExtGState soft masks (drawn approximately), unsupported tint functions
+(drawn as grey), annotation
 appearances, and optional-content visibility (everything is drawn). The
 `text-*` entries name the fonts concerned. Check `complete()` before treating a
 render as the whole page.
@@ -376,6 +384,9 @@ Rendering is bounded like reading: the pixel count is judged before anything
 is allocated, every operator counts against `maxOperators`, forms nest at most
 `maxFormDepth` deep and never into themselves, and each render has its own
 time budget (see [Hostile input](#hostile-input)).
+Raster, clip and JPEG allocations also reserve row overhead and PHP's hard
+memory-limit headroom before allocating. Unsupported nested or Matte image
+masks produce a reported placeholder.
 
 ## License
 

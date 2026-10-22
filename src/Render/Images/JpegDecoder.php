@@ -224,9 +224,7 @@ final class JpegDecoder
         if ($total > $this->budget->limits->maxStreamBytes) {
             throw new RefusedException('too_large', 'JPEG component planes exceed the decoded stream limit.');
         }
-        if ($total + (float) $this->width * $this->height * count($this->components) > $this->budget->limits->memoryBytes) {
-            throw new RefusedException('memory_budget', 'JPEG component planes exceed the memory budget.');
-        }
+        $this->budget->allocation($total + (float) $this->width * $this->height * count($this->components));
         $this->budget->decoded((int) $total);
         foreach ($this->components as &$c) {
             $this->budget->check();
