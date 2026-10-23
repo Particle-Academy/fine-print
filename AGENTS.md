@@ -18,7 +18,8 @@ P1 is the reader plus the security layer; P2 is the writer (`src/Writer`);
 P3a is the renderer core (`src/Render`: vector paths to PNG); P3b draws
 TrueType text (`src/Render/Glyphs`); P3c adds sampled/JPEG images; P3d adds
 clipping, alpha and tint functions. CFF / Type 1 / Type 3 fonts, advanced
-transparency and Laravel serving (P4) are later. See the envelope plan.
+transparency remain later. P4 serves authenticated cached/watermarked page
+images through an optional Laravel 13 adapter. See the envelope plan.
 
 | layer | where | trusts its input? |
 |---|---|---|
@@ -161,6 +162,35 @@ JPX, JBIG2 and CCITT are reported placeholders, not silently complete.
   exhaust row-array memory; child-process tests reproduce both that and a
   physical PHP limit breach. Conservative capacity checks may refuse a sparse
   raster whose initial shared blank rows would have been smaller.
+
+## Page serving (P4)
+
+- `Laravel\PageImages::register` belongs in a service provider's boot. Routes
+  store a controller + opaque binding key; never capture resolvers/cache clients
+  into a serialised route. Domain/prefix scopes distinguish handler bindings.
+- App middleware runs first; the resolver authorises on EVERY request before
+  a cache lookup. PageSource key/version are server values. Cache keys also
+  include a content hash, page, bounded quarter-step scale and limits.
+- `PageSource::fromStream` reads only a caller-opened authorised resource,
+  capped at maxBytes + 1 and cooperatively timed/memory-guarded; never opens
+  client paths/URLs. Caller owns the resource. Its refusals become HTTP errors.
+- `RasterCache` uses compressed RGB + bounded JSON metadata and a SHA-256
+  corruption check. It is private cache data, not authenticated against a
+  compromised cache backend. No PHP object deserialisation. Parser warnings
+  are not cached; stable render metadata/pixels are preserved. A corrupt packet
+  is a cache miss; a Budget refusal must propagate.
+- `Watermark` always copies the clean raster. Names/email/time are per request,
+  bounded to three lines/96 WinAnsi characters, hex-encoded before interpretation.
+  Source pixels/omission flags survive. Required stamp failures cannot become
+  an unwatermarked success. WinAnsiEncoding is explicit (Euro pixel reference).
+- One three-second rendering budget spans cache restore/render/stamp/PNG; cold
+  render stages inherit remaining time/memory. App/source/backend I/O outside
+  those cooperative operations remains the host's timeout responsibility.
+- Incomplete pages refuse by default; explicit host opt-in preserves the
+  complete flag header. Never return PDF bytes or attacker exception text.
+- Test-only Illuminate 13 components are the RULES.md framework carve-out;
+  `StandaloneTest` proves core use without vendor/autoload.php. Do not let
+  framework globals become accidental core runtime dependencies.
 
 ## Encryption (owner ruling 2026-10-21: open empty-password files)
 

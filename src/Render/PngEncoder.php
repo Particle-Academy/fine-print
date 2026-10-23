@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace FinePrint\Render;
 
+use FinePrint\Budget;
 use InvalidArgumentException;
 
 /**
@@ -31,7 +32,7 @@ final class PngEncoder
      * @param  3|4  $channels  3 = RGB, 4 = RGBA
      * @param  'none'|'sub'|'up'|'average'|'paeth'|'adaptive'  $filter
      */
-    public static function encode(int $width, int $height, array $rows, int $channels = 3, string $filter = 'none', int $level = 6): string
+    public static function encode(int $width, int $height, array $rows, int $channels = 3, string $filter = 'none', int $level = 6, ?Budget $budget = null): string
     {
         if ($width < 1 || $height < 1 || $width > 0x7FFFFFFF || $height > 0x7FFFFFFF) {
             throw new InvalidArgumentException('A PNG must be at least 1 x 1.');
@@ -46,10 +47,12 @@ final class PngEncoder
             throw new InvalidArgumentException('Expected '.$height.' rows, got '.count($rows).'.');
         }
         $stride = $width * $channels;
+        $budget?->allocation((float) $stride * $height * 4 + (float) $height * 96 + $stride);
 
         $raw = '';
         $prev = str_repeat("\0", $stride);
         foreach (array_values($rows) as $y => $row) {
+            $budget?->tick($stride);
             if (strlen($row) !== $stride) {
                 throw new InvalidArgumentException('Row '.$y.' is '.strlen($row).' bytes, expected '.$stride.'.');
             }
@@ -61,10 +64,13 @@ final class PngEncoder
 
         $ihdr = pack('NNCCCCC', $width, $height, 8, $channels === 3 ? 2 : 6, 0, 0, 0);
 
-        return "\x89PNG\r\n\x1a\n"
+        $out = "\x89PNG\r\n\x1a\n"
             .self::chunk('IHDR', $ihdr)
             .self::chunk('IDAT', (string) gzcompress($raw, $level))
             .self::chunk('IEND', '');
+        $budget?->check();
+
+        return $out;
     }
 
     private static function chunk(string $type, string $data): string

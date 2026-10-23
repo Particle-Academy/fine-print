@@ -67,6 +67,20 @@ final class Budget
         }
     }
 
+    public function remainingSeconds(): float
+    {
+        $this->check();
+
+        return max(0.0, ($this->deadline - hrtime(true)) / 1e9);
+    }
+
+    public function remainingMemory(): int
+    {
+        $this->check();
+
+        return max(0, $this->limits->memoryBytes - (memory_get_usage() - $this->memoryStart));
+    }
+
     private function hardMemoryLimit(): ?int
     {
         $raw = trim((string) ini_get('memory_limit'));

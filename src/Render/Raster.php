@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace FinePrint\Render;
 
 use FinePrint\Budget;
+use InvalidArgumentException;
 
 /**
  * An opaque RGB canvas, one byte string per row (3 bytes per pixel), white
@@ -18,8 +19,26 @@ final class Raster
     /** @var list<string> */
     private array $rows;
 
-    public function __construct(public readonly int $width, public readonly int $height, ?Budget $budget = null)
+    public function __construct(public readonly int $width, public readonly int $height, ?Budget $budget = null, ?array $rows = null)
     {
+        if ($width < 1 || $height < 1) {
+            throw new InvalidArgumentException('A raster must have positive dimensions.');
+        }
+        if ($rows !== null) {
+            if (count($rows) !== $height) {
+                throw new InvalidArgumentException('Raster row count does not match its height.');
+            }
+            foreach ($rows as $row) {
+                $budget?->tick();
+                if (! is_string($row) || strlen($row) !== $width * 3) {
+                    throw new InvalidArgumentException('Invalid RGB raster row.');
+                }
+            }
+            $this->rows = array_values($rows);
+            $budget?->check();
+
+            return;
+        }
         // Worst-case painted rows include string/array overhead and a
         // temporary row. Pixel count alone misses a 1 x 4,000,000 page.
         $budget?->allocation((float) $width * $height * 3 + (float) $height * 96 + (float) $width * 3);

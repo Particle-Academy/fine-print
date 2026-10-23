@@ -8,8 +8,31 @@ BREAKING and says what a consumer must do.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-22
+
+First release. Install with `composer require particle-academy/fine-print`;
+there is no migration. Optional Laravel serving needs an app-owned resolver
+that authorises each file; see the README's service-provider example.
+
 ### Added
 
+- **Optional Laravel 13 page-image serving:** route-cache-compatible
+  `PageImages::register()`, app authentication and per-request file
+  authorisation before cache access. `PageSource::fromStream()` reads only
+  an already-authorised stream with bounded bytes, memory and time.
+- **Private watermarked PNG responses:** a shared clean raster is restored
+  from a versioned/checksummed compressed-RGB packet, never PHP object
+  deserialisation. The authenticated viewer's name, email or ID and server
+  request time are burned into a copy on every request. Labels are bounded
+  WinAnsi glyph data. No PDF bytes or another viewer's marked image are served.
+- **Serving limits:** three seconds for cache/render/watermark/PNG, 32 MB
+  source files, eight million render pixels, 8192 pixels per side and quarter
+  scales up to 4x by default. Incomplete pages return 422 unless the host opts
+  in; size, time, memory and malformed-input refusals return clean errors.
+- Real Laravel 13 routing/cache/http/events components as TEST dependencies
+  for the optional serving adapter. This is the framework test-dependency
+  exception in workspace RULES.md; no framework runtime requirement is added.
+  Laravel v13.38.0 released 2026-10-20 (freshness checked before adding).
 - **P3d clipping and transparency subset:** nonzero/even-odd path clips,
   Form BBox, text clips accumulated through ET, constant CA/ca, grayscale
   image soft masks, explicit stencil and colour-key masks. Separation/DeviceN
@@ -32,7 +55,8 @@ BREAKING and says what a consumer must do.
   tables and streams, hybrid files, incremental updates (newest object wins)
   and object streams. Decodes FlateDecode, LZWDecode, ASCII85Decode,
   ASCIIHexDecode and RunLengthDecode, with PNG and TIFF predictors. Image
-  codecs (DCT, JPX, CCITT, JBIG2) are kept as opaque bytes and never decoded.
+  codecs remain opaque during text extraction; the renderer decodes baseline
+  DCT itself and reports unsupported JPX, CCITT and JBIG2 images.
 - **Text extraction in reading order** (`Document::text()`), through the font's
   ToUnicode CMap, its encoding and `/Differences`, including two-byte Type0
   fonts and text inside form XObjects.

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace FinePrint\Render;
 
+use FinePrint\Budget;
+
 /**
  * One rendered page: the raster, its size, and what was NOT drawn.
  *
@@ -78,9 +80,9 @@ final class Rendering
      *
      * @param  'none'|'sub'|'up'|'average'|'paeth'|'adaptive'  $filter
      */
-    public function png(string $filter = 'none', int $level = 6): string
+    public function png(string $filter = 'none', int $level = 6, ?Budget $budget = null): string
     {
-        return PngEncoder::encode($this->width, $this->height, $this->raster->rows(), 3, $filter, $level);
+        return PngEncoder::encode($this->width, $this->height, $this->raster->rows(), 3, $filter, $level, $budget);
     }
 
     /** @return array{0: int, 1: int, 2: int} [r, g, b] at (x, y), top-left origin */

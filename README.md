@@ -17,8 +17,9 @@ no third-party PDF library. Just PHP 8.4 and its bundled `zlib`, `mbstring`,
 > **Status: 0.x, reader and writer, plus the first steps of a page renderer.**
 > The renderer draws vector paths, TrueType text and sampled image XObjects
 > (see [Rendering pages](#rendering-pages)); other font types, advanced image codecs and
-> advanced transparency are later steps, and Laravel page-image serving is a later phase. Pre-1.0, breaking changes may land in a minor release; the
-> [changelog](CHANGELOG.md) marks each one.
+> advanced transparency are later steps. Laravel 13 page-image serving is
+> available through the optional adapter below. Pre-1.0, breaking changes may
+> land in a minor release; the [changelog](CHANGELOG.md) marks each one.
 
 ## Why
 
@@ -387,6 +388,108 @@ time budget (see [Hostile input](#hostile-input)).
 Raster, clip and JPEG allocations also reserve row overhead and PHP's hard
 memory-limit headroom before allocating. Unsupported nested or Matte image
 masks produce a reported placeholder.
+
+## Laravel page images
+
+The optional Laravel 13 adapter serves PNG pages behind your app's own auth
+and file policy. It never serves the PDF bytes. Register it in a service
+provider's `boot()` so the handler binding also exists when routes are cached:
+
+```php
+use App\Models\Document as StoredDocument;
+use FinePrint\Laravel\PageImages;
+use FinePrint\Laravel\PageSource;
+use Illuminate\Contracts\Cache\Repository;
+use Illuminate\Http\Request;
+use Illuminate\Routing\Router;
+use Illuminate\Support\Facades\Storage;
+
+public function boot(Router $router, Repository $cache): void
+{
+    PageImages::register(
+        $router,
+        '/private-pdf/{file}/{page}.png',
+        function (Request $request, string $id): ?PageSource {
+            $document = StoredDocument::find($id);
+            if (! $document || ! $request->user()->can('view', $document)) {
+                return null;
+            }
+
+            $stream = Storage::disk('private')->readStream($document->path);
+            if (! is_resource($stream)) {
+                return null;
+            }
+            try {
+                return PageSource::fromStream(
+                    $stream,
+                    key: $document->tenant_id.':'.$document->getKey(),
+                    version: (string) $document->updated_at->getTimestamp(),
+                );
+            } finally {
+                fclose($stream);
+            }
+        },
+        $cache,
+    )->name('private-pdf.page');
+}
+```
+
+Replace the model and policy with your app's. The resolver runs on **every
+request**, including cache hits. `PageSource` takes already-authorised bytes,
+a server file identity and a server version. `fromStream()` instead reads an
+already-open, host-authorised stream, at most the byte limit plus one byte,
+with memory preflights and a two-second reading budget. It leaves ownership
+of the resource with the caller and never opens a path or URL.
+
+The clean raster cache includes the file identity, version, content hash,
+page, canonical scale and limits. It contains compressed RGB and validated
+render metadata, with a version/checksum and bounded streaming decompression;
+no PHP objects are deserialised. The cache backend is your app's private store.
+Watermarks are applied to a copy per authorised request, so cached clean pages
+can be shared without reusing another viewer's identity.
+
+By default the watermark tiles the authenticated user's name, email (or ID)
+and the server's request time in UTC into the actual pixels. Pass one to three
+trusted text lines as `PageSource`'s `watermark` argument to customise them. Lines are
+bounded and encoded as glyph data, never PDF operators. The bundled font uses
+WinAnsi; use an email/ID when a name needs characters outside that font.
+
+Serving defaults (override with the final `options` array):
+
+| option | default |
+|---|---|
+| `middleware` | `['auth']`; your app may supply its own auth middleware |
+| `limits.renderTimeSeconds` | 3 seconds for cache/render/watermark/PNG together |
+| `limits.maxFileBytes` | 32 MB |
+| `limits.maxRenderPixels` | 8 million |
+| `maxDimension` | 8192 pixels per side |
+| `maxScale` | 4; client scales quantise to quarter steps from 0.25 |
+| `ttl` | 300 seconds for clean raster entries |
+| `namespace` | `fine-print.raster.v1` |
+| `watermark` | `true` |
+| `requireComplete` | `true`; incomplete renderer output returns 422 |
+
+Authentication/source I/O and cache-backend network timeouts remain the app's
+responsibility. The rendering budget covers our cache, renderer, watermark and
+PNG work; source-stream reading has its separate budget. Size violations return
+413, invalid scales 400, inaccessible files/pages 404, and other clean refusals
+422, with stable reasons and no file content in the error. PNG responses are
+`private, no-store` with `nosniff`. If the host explicitly sets
+`requireComplete: false`, partial images retain `X-FinePrint-Complete: 0`.
+
+For `react-fancy`'s `PdfViewer`, obtain the count on the server after the same
+file authorisation (`Agent::pageCount($pdfBytes)`), then provide image URLs:
+
+```tsx
+<PdfViewer pages={{
+  count: pageCount,
+  url: (page, scale) => `/private-pdf/${encodeURIComponent(fileId)}/${page}.png?scale=${scale}`,
+}} />
+```
+
+All Illuminate packages are optional suggestions for consumers. They are test
+dependencies here so the route/cache integration is exercised against Laravel
+13. A separate child process tests the core with no vendor/framework autoloader.
 
 ## License
 
