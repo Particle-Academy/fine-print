@@ -131,12 +131,29 @@ final class Renderer
         $budget = new Budget($limits->with(['timeSeconds' => $limits->renderTimeSeconds]), 'Rendering');
         $budget->reservePixels($w * $h);
         $content = $doc->pageContents($number);
-        $raster = new Raster($w, $h, $budget, transparentPage: true);
+        $raster = new Raster($w, $h, $budget);
         $budget->check();
 
         $interp = new Interpreter($doc, $raster, $budget, $base);
         $group = $doc->resolve($p['dict']->get('Group'));
-        $interp->run($content, $p['resources'], $group instanceof PdfDict ? $group : null);
+        $retry = false;
+        try {
+            $interp->run($content, $p['resources'], $group instanceof PdfDict ? $group : null);
+        } catch (PageAlphaRequired) {
+            $retry = true;
+        }
+        if ($retry) {
+            // A later blend needs the true backdrop alpha, including earlier
+            // antialiased/transparent paint. Replay once; never guess it from
+            // the displayed RGB. Release the first pass and exception trace
+            // before allocating. Time/memory/pixels remain on the SAME budget.
+            $spent = $interp->operators();
+            unset($interp, $raster);
+            $budget->check();
+            $raster = new Raster($w, $h, $budget, transparentPage: true);
+            $interp = new Interpreter($doc, $raster, $budget, $base, $spent);
+            $interp->run($content, $p['resources'], $group instanceof PdfDict ? $group : null);
+        }
         self::annotations($doc, $p['dict'], $interp);
 
         $skipped = $interp->skipped();

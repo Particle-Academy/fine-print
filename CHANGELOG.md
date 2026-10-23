@@ -8,6 +8,36 @@ BREAKING and says what a consumer must do.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-23
+
+### Fixed
+
+- Restore ordinary PDF rendering performance after 0.2.0's transparency work.
+  Plain pages use RGB spans with colour converted once per paint, skip alpha
+  storage and reuse identical opaque rows in a bounded cache. Images use the
+  direct RGB route when equivalent. Upgrade normally; pixels, completeness,
+  cache revision and strict page-image defaults stay the same.
+- Allocate page alpha only when an actual non-Normal blend needs it. Replay
+  once to recover earlier transparency under the same time, memory, pixel and
+  operator budgets. Preserve image/stencil component clamping from 0.2.0.
+- Deduplicate memory preflight snapshots while retaining copy-on-write guards
+  and detecting runtime PHP memory-limit changes. Refuse extremely wide raster
+  edges before their sparse cell arrays exhaust PHP's hard memory limit.
+
+### Validation
+
+- Six owned opaque fixtures keep byte-identical RGB output to 0.2.0 and
+  allocate no page-alpha, shape or offscreen planes. A fixed 1.75x budget
+  against an independent in-run RGB raster reference catches the regression;
+  the released 0.2.0 measures 3.35x on the same guard.
+- Alternating same-process seven-run medians before/after (ms): blocks
+  34.91/13.97, deck 394.88/261.96, P2 report 109.40/71.67,
+  P2 text 35.57/21.01, standard fonts 176.86/120.14, sampled image
+  168.91/97.53. These are within 9% of 0.1.0 or faster while retaining the
+  newer allocation guards; timings are evidence, not absolute CI thresholds.
+- All twelve local Quartz page/scale PNGs remain byte-identical to 0.2.0.
+  No dependency, font, golden fixture or workflow is changed.
+
 ## [0.2.0] - 2026-10-23
 
 Mac Quartz PDFs that use ordinary transparency groups and device-space soft

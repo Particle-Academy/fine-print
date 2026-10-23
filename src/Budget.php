@@ -26,6 +26,10 @@ final class Budget
 
     private int $renderPixels = 0;
 
+    private ?string $hardMemoryRaw = null;
+
+    private ?int $hardMemoryBytes = null;
+
     /** @param string $activity what is being budgeted, for refusal messages ("Reading", "Rendering") */
     public function __construct(public readonly Limits $limits, private readonly string $activity = 'Reading')
     {
@@ -45,26 +49,32 @@ final class Budget
     /** @throws RefusedException */
     public function check(): void
     {
-        if (hrtime(true) > $this->deadline) {
-            throw new RefusedException('time_budget', $this->activity.' took longer than the '.$this->limits->timeSeconds.'s time budget.');
-        }
-        if (memory_get_usage() - $this->memoryStart > $this->limits->memoryBytes) {
-            throw new RefusedException('memory_budget', $this->activity.' needed more than the '.$this->limits->memoryBytes.'-byte memory budget.');
-        }
-        $hard = $this->hardMemoryLimit();
-        if ($hard !== null && memory_get_usage(true) + 2 * 1024 * 1024 > $hard) {
-            throw new RefusedException('memory_budget', $this->activity.' is too close to the PHP memory limit.');
-        }
+        $this->guard(0);
     }
 
     /** Judge a worst-case allocation BEFORE PHP attempts it (includes arena headroom). */
     public function allocation(float|int $bytes): void
     {
-        $this->check();
+        $this->guard($bytes);
+    }
+
+    /** One snapshot for a preflight: never repeat clock/memory/INI work per span. */
+    private function guard(float|int $bytes): void
+    {
+        if (hrtime(true) > $this->deadline) {
+            throw new RefusedException('time_budget', $this->activity.' took longer than the '.$this->limits->timeSeconds.'s time budget.');
+        }
         $growth = memory_get_usage() - $this->memoryStart;
+        if ($growth > $this->limits->memoryBytes) {
+            throw new RefusedException('memory_budget', $this->activity.' needed more than the '.$this->limits->memoryBytes.'-byte memory budget.');
+        }
         $hard = $this->hardMemoryLimit();
+        $physical = $hard !== null ? $hard - memory_get_usage(true) - 2 * 1024 * 1024 : null;
+        if ($physical !== null && $physical < 0) {
+            throw new RefusedException('memory_budget', $this->activity.' is too close to the PHP memory limit.');
+        }
         if (! is_finite((float) $bytes) || $bytes < 0 || $bytes > $this->limits->memoryBytes - $growth
-            || ($hard !== null && $bytes > $hard - memory_get_usage(true) - 2 * 1024 * 1024)) {
+            || ($physical !== null && $bytes > $physical)) {
             throw new RefusedException('memory_budget', $this->activity.' would exceed the available memory during allocation.');
         }
     }
@@ -99,9 +109,14 @@ final class Budget
 
     private function hardMemoryLimit(): ?int
     {
-        $raw = trim((string) ini_get('memory_limit'));
+        $raw = (string) ini_get('memory_limit');
+        if ($raw === $this->hardMemoryRaw) {
+            return $this->hardMemoryBytes;
+        }
+        $this->hardMemoryRaw = $raw;
+        $raw = trim($raw);
         if ((float) $raw <= 0) {
-            return null;
+            return $this->hardMemoryBytes = null;
         }
         $factor = match (strtolower(substr($raw, -1))) {
             'k' => 1024, 'm' => 1024 * 1024, 'g' => 1024 * 1024 * 1024, default => 1,
@@ -109,7 +124,7 @@ final class Budget
 
         $bytes = (float) $raw * $factor;
 
-        return $bytes >= (float) PHP_INT_MAX ? PHP_INT_MAX : (int) $bytes;
+        return $this->hardMemoryBytes = $bytes >= (float) PHP_INT_MAX ? PHP_INT_MAX : (int) $bytes;
     }
 
     /**

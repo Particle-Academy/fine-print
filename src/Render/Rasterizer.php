@@ -96,13 +96,20 @@ final class Rasterizer
             if ($ry1 <= $ry0) {
                 continue;
             }
-            $this->rowLine($r, $x0 + ($ry0 - $y0) * $dxdy, $ry0, $x0 + ($ry1 - $y0) * $dxdy, $ry1, $dir);
-            $this->budget?->tick();
+            if ($this->height > 8192 && ! isset($this->cover[$r])) {
+                $rows = count($this->cover);
+                if ($rows >= 1024 && ($rows & ($rows - 1)) === 0) {
+                    // Both sparse outer tables can grow before the next tick.
+                    $this->budget?->allocation($rows * 256 + 1024 * 1024);
+                }
+            }
+            $cells = $this->rowLine($r, $x0 + ($ry0 - $y0) * $dxdy, $ry0, $x0 + ($ry1 - $y0) * $dxdy, $ry1, $dir);
+            $this->budget?->tick($cells);
         }
     }
 
     /** One edge piece inside row $r, from (xa, ya) to (xb, yb). */
-    private function rowLine(int $r, float $xa, float $ya, float $xb, float $yb, float $dir): void
+    private function rowLine(int $r, float $xa, float $ya, float $xb, float $yb, float $dir): int
     {
         $w = (float) $this->width;
         if ($xa > $xb) {
@@ -111,7 +118,7 @@ final class Rasterizer
         }
         // Now xa <= xb. Cut off what lies right of the canvas.
         if ($xa >= $w) {
-            return;
+            return 1;
         }
         if ($xb > $w) {
             $yb = $ya + ($yb - $ya) * ($w - $xa) / ($xb - $xa);
@@ -122,7 +129,7 @@ final class Rasterizer
             if ($xb <= 0.0) {
                 $this->cell($r, 0, ($yb - $ya) * $dir, 0.0);
 
-                return;
+                return 1;
             }
             $ym = $ya + ($yb - $ya) * (0.0 - $xa) / ($xb - $xa);
             $this->cell($r, 0, ($ym - $ya) * $dir, 0.0);
@@ -139,12 +146,18 @@ final class Rasterizer
             $cx1 = $this->width - 1;
         }
         if ($cx0 >= $this->width) {
-            return;
+            return 1;
+        }
+        $cells = $cx1 - $cx0 + 1;
+        if ($cells >= 512) {
+            // A single shallow edge can allocate a huge sparse row before
+            // returning to addLine. Preflight both hash tables and growth.
+            $this->budget?->allocation((count($this->cover[$r] ?? []) + $cells) * 256 + 1024 * 1024);
         }
         if ($cx0 === $cx1) {
             $this->cell($r, $cx0, ($yb - $ya) * $dir, ($xa + $xb) / 2 - $cx0);
 
-            return;
+            return 1;
         }
         $slope = ($yb - $ya) / ($xb - $xa);
         $xn = (float) ($cx0 + 1);
@@ -152,10 +165,15 @@ final class Rasterizer
         $this->cell($r, $cx0, ($yn - $ya) * $dir, ($xa + $xn) / 2 - $cx0);
         $step = $slope * $dir;
         for ($x = $cx0 + 1; $x < $cx1; $x++) {
+            if (($x & 511) === 0) {
+                $this->budget?->tick(512);
+            }
             $this->cell($r, $x, $step, 0.5);
             $yn += $slope;
         }
         $this->cell($r, $cx1, ($yb - $yn) * $dir, ($cx1 + $xb) / 2 - $cx1);
+
+        return $cells < 512 ? $cells : 1;
     }
 
     private function cell(int $r, int $x, float $dy, float $fx): void

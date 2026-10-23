@@ -24,6 +24,17 @@ final class Raster
 
     private string $paintedRows = '';
 
+    /** One bounded opaque span result, shared only when its WHOLE input row matches. */
+    private int $opaqueX = -1;
+
+    private int $opaqueLength = 0;
+
+    private string $opaqueColour = '';
+
+    private ?string $opaqueInput = null;
+
+    private ?string $opaqueOutput = null;
+
     public function __construct(public readonly int $width, public readonly int $height, private readonly ?Budget $budget = null, ?array $rows = null, public readonly ?GroupSurface $surface = null, bool $transparentPage = false)
     {
         if ($width < 1 || $height < 1) {
@@ -91,8 +102,35 @@ final class Raster
                 return;
             }
         }
-        $this->guardRow($y, $a >= 0.998 && $len >= 16, $budget);
-        $this->accumulateAlpha($y, $x, $len, $a, $budget);
+        if ($len >= 64 && $a >= 0.998 && $this->alphaRows === null) {
+            $colour = chr($r).chr($g).chr($b);
+            if ($x === $this->opaqueX && $len === $this->opaqueLength && $colour === $this->opaqueColour
+                && $this->rows[$y] === $this->opaqueInput) {
+                // Identical rectangle rows need no new allocation or preflight.
+                $this->rows[$y] = $this->opaqueOutput;
+            } else {
+                $this->guardRow($y, true, $budget);
+                $input = $this->rows[$y];
+                $output = substr_replace($input, str_repeat($colour, $len), $x * 3, $len * 3);
+                $this->rows[$y] = $output;
+                $this->opaqueX = $x;
+                $this->opaqueLength = $len;
+                $this->opaqueColour = $colour;
+                $this->opaqueInput = $input;
+                $this->opaqueOutput = $output;
+            }
+            // The result is shared with the cache/other rows. A later pixel
+            // write MUST preflight its copy, even though this row was painted.
+            $this->paintedRows[$y] = "\0";
+
+            return;
+        }
+        if ($this->paintedRows[$y] === "\0" || ($a >= 0.998 && $len >= 16)) {
+            $this->guardRow($y, $a >= 0.998 && $len >= 16, $budget);
+        }
+        if ($this->alphaRows !== null) {
+            $this->accumulateAlpha($y, $x, $len, $a, $budget);
+        }
         $row = &$this->rows[$y];
         if ($a >= 0.998) {
             if ($len >= 16) {
@@ -139,6 +177,11 @@ final class Raster
     public function rows(): array
     {
         return $this->rows;
+    }
+
+    public function hasPageAlpha(): bool
+    {
+        return $this->alphaRows !== null;
     }
 
     /** Straight native colour and alpha, including a group's initial backdrop. */

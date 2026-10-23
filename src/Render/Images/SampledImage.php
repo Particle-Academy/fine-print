@@ -272,6 +272,12 @@ final class SampledImage
         return $this->alpha !== null || $this->colourKey !== null;
     }
 
+    /** Direct bytes have the same clamping as the renderer's RGB conversion. */
+    public function canPaintRgbDirectly(): bool
+    {
+        return $this->space->kind === 'rgb' || $this->space->kind === 'gray';
+    }
+
     public function maskIsShape(): bool
     {
         return $this->alpha?->stencil ?? false;

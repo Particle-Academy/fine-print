@@ -24,4 +24,7 @@ it('refuses offscreen and soft-mask allocations before a child hits its PHP hard
     fclose($pipes[2]);
     expect(proc_close($process))->toBe(0)->and($out)->toBe('memory_budget')->and($err)->toBe('');
 })->with(['configured group budget' => ['configured', '64M'], 'group PHP headroom' => ['hard', '32M'], 'mask PHP headroom' => ['mask', '32M'],
-    'late group row' => ['late-group-row', '32M'], 'late page row' => ['late-page-row', '32M']]);
+    'late group row' => ['late-group-row', '32M'], 'late page row' => ['late-page-row', '32M'],
+    'lowered PHP limit invalidates cache' => ['lowered-limit', '64M'],
+    'cached rows remain guarded on first copy' => ['late-cached-row', '32M'],
+    'wide raster edge cell allocation' => ['wide-edge', '32M']]);

@@ -97,13 +97,17 @@ final class Interpreter
     /** @var array<string, array<string, true>> */
     private array $skippedFonts = [];
 
+    private readonly Raster $pageRaster;
+
     /** @param list<float> $baseMatrix default user space to device pixels */
     public function __construct(
         private readonly Document $doc,
         private Raster $raster,
         private readonly Budget $budget,
         array $baseMatrix,
+        private readonly int $pastOperators = 0,
     ) {
+        $this->pageRaster = $raster;
         $this->gs = new GraphicsState;
         $this->gs->ctm = $baseMatrix;
         $this->path = new Path;
@@ -194,7 +198,7 @@ final class Interpreter
     {
         $max = $this->budget->limits->maxOperators;
         foreach ($ops as [$op, $o]) {
-            if (++$this->operators > $max) {
+            if (++$this->operators + $this->pastOperators > $max) {
                 throw new RefusedException('too_many_operators', 'A page has more than '.$max.' content-stream operators.');
             }
             $this->budget->tick();
@@ -631,6 +635,7 @@ final class Interpreter
         if ($gs->unsupportedMask || $gs->unsupportedBlend) {
             $this->skip('transparency');
         }
+        $this->requirePageAlpha();
 
         return $space->toRgb($stroke ? $gs->stroke : $gs->fill);
     }
@@ -697,9 +702,47 @@ final class Interpreter
     }
 
     /** @param array{0: int, 1: int, 2: int} $rgb */
-    private function blit(Rasterizer $r, bool $evenOdd, array $rgb, float $alpha, bool $stroke = false): void
+    private function blit(Rasterizer $r, bool $evenOdd, array $rgb, float $alpha, bool $stroke = false, bool $coalesce = true): void
     {
         $gs = $this->gs;
+        if ($this->raster->surface === null && $gs->softMask === null
+            && in_array($gs->blendMode, ['Normal', 'Compatible'], true)) {
+            // The original RGB span route: colour is converted ONCE per paint,
+            // not once per scanline or glyph span. Alpha rows are absent on an
+            // ordinary page; no shape/blend dispatch is involved in its spans.
+            [$red, $green, $blue] = $rgb;
+            if (! $coalesce) {
+                foreach ($r->spans($evenOdd) as [$y, $x, $len, $a]) {
+                    $this->raster->span($y, $x, $len, $red, $green, $blue, $a * $alpha, $gs->clip, $this->budget);
+                }
+
+                return;
+            }
+            $lastY = -1;
+            $lastX = $lastLen = 0;
+            $lastCoverage = 0.0;
+            foreach ($r->spans($evenOdd) as [$y, $x, $len, $a]) {
+                // Cell edges and interiors often arrive as three adjacent
+                // equal-coverage runs. Combine them without changing a pixel.
+                if ($y === $lastY && $x === $lastX + $lastLen && $a === $lastCoverage) {
+                    $lastLen += $len;
+
+                    continue;
+                }
+                if ($lastY >= 0) {
+                    $this->raster->span($lastY, $lastX, $lastLen, $red, $green, $blue, $lastCoverage * $alpha, $gs->clip, $this->budget);
+                }
+                $lastY = $y;
+                $lastX = $x;
+                $lastLen = $len;
+                $lastCoverage = $a;
+            }
+            if ($lastY >= 0) {
+                $this->raster->span($lastY, $lastX, $lastLen, $red, $green, $blue, $lastCoverage * $alpha, $gs->clip, $this->budget);
+            }
+
+            return;
+        }
         $colour = $stroke ? $gs->stroke : $gs->fill;
         $space = $stroke ? $gs->strokeSpace : $gs->fillSpace;
         foreach ($r->spans($evenOdd) as [$y, $x, $len, $a]) {
@@ -912,25 +955,28 @@ final class Interpreter
                 $this->textClip->addFlat($poly);
             }
         }
-        $paint = function () use ($fillRgb, $strokeRgb, $o, $m, $g, $deviceYShift) {
-            if ($fillRgb !== null) {
-                $r = new Rasterizer($this->raster->width, $this->raster->height, $this->budget);
-                foreach (Path::flattenSubpaths($o->subpaths, $m, self::TOLERANCE) as $poly) {
-                    $r->addFlat($poly);
-                }
-                $this->blit($r, false, $fillRgb, $this->gs->fillAlpha);
-            }
-            if ($strokeRgb !== null) {
-                // Translate the stroker's device matrix, preserving the user-space
-                // pen shape even under rotated, skewed or singular CTMs.
-                $this->stroke(Path::fromSubpaths($o->subpaths, $g), $strokeRgb, $deviceYShift);
-            }
-        };
         if ($fillRgb !== null && $strokeRgb !== null) {
             $region = self::deviceBounds([min($xs) - $margin, min($ys) - $margin, max($xs) + $margin, max($ys) + $margin], [1, 0, 0, 1, 0, 0], $this->raster->width, $this->raster->height);
-            $this->atomic($paint, $region);
+            $this->atomic(fn () => $this->paintGlyph($o->subpaths, $m, $g, $fillRgb, $strokeRgb, $deviceYShift), $region);
         } else {
-            $paint();
+            $this->paintGlyph($o->subpaths, $m, $g, $fillRgb, $strokeRgb, $deviceYShift);
+        }
+    }
+
+    /** Ordinary glyph paint needs neither an atomic callback nor span coalescing. */
+    private function paintGlyph(array $subpaths, array $m, array $g, ?array $fillRgb, ?array $strokeRgb, float $deviceYShift): void
+    {
+        if ($fillRgb !== null) {
+            $r = new Rasterizer($this->raster->width, $this->raster->height, $this->budget);
+            foreach (Path::flattenSubpaths($subpaths, $m, self::TOLERANCE) as $poly) {
+                $r->addFlat($poly);
+            }
+            $this->blit($r, false, $fillRgb, $this->gs->fillAlpha, coalesce: false);
+        }
+        if ($strokeRgb !== null) {
+            // Translate the stroker's device matrix, preserving the user-space
+            // pen shape even under rotated, skewed or singular CTMs.
+            $this->stroke(Path::fromSubpaths($subpaths, $g), $strokeRgb, $deviceYShift);
         }
     }
 
@@ -1035,6 +1081,7 @@ final class Interpreter
         $group = $this->doc->resolve($x->dict->get('Group'));
         $offscreen = null;
         if ($group instanceof PdfDict && $group->name('S') === 'Transparency') {
+            $this->requirePageAlpha();
             $space = $this->groupSpace($group, $formResources instanceof PdfDict ? $formResources : $resources);
             $isolated = $this->doc->resolve($group->get('I')) === true;
             if (! $mask && ($this->gs->unsupportedBlend || $this->gs->unsupportedMask)) {
@@ -1177,6 +1224,7 @@ final class Interpreter
 
     private function image(PdfStream $stream, ?PdfDict $resources, string $kind): void
     {
+        $this->requirePageAlpha();
         try {
             $image = SampledImage::load($stream, $this->doc, $this->budget, $resources);
             $fill = $image->stencil ? $this->paint(false) : [0, 0, 0];
@@ -1189,6 +1237,14 @@ final class Interpreter
         } catch (ImageException) {
             $this->skip($kind);
             ImagePainter::paint(SampledImage::placeholder(), $this->raster, $this->gs->ctm, [0, 0, 0], $this->budget, $this->gs->clip, $this->gs->fillAlpha, $this->gs);
+        }
+    }
+
+    /** Ordinary source-over never needs page alpha; a non-Normal blend does. */
+    private function requirePageAlpha(): void
+    {
+        if (! in_array($this->gs->blendMode, ['Normal', 'Compatible'], true) && ! $this->pageRaster->hasPageAlpha()) {
+            throw new PageAlphaRequired;
         }
     }
 

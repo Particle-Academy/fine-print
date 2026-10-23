@@ -13,6 +13,30 @@ use FinePrint\Render\Renderer;
 use FinePrint\Tests\Support\PdfBuilder;
 
 try {
+    if (($argv[1] ?? '') === 'wide-edge') {
+        $pdf = PdfBuilder::textPdf(['0 0 m 1000000 1 l 0 1 l h f'], ['mediaBox' => '[0 0 1000000 1]'])->build();
+        Renderer::render($pdf);
+        echo 'unexpected success';
+        exit(2);
+    }
+    if (($argv[1] ?? '') === 'late-cached-row') {
+        $budget = new Budget(new Limits);
+        $raster = new Raster(200000, 2, $budget);
+        $raster->span(0, 0, 200000, 255, 0, 0, 1.0, budget: $budget);
+        $raster->span(1, 0, 200000, 255, 0, 0, 1.0, budget: $budget);
+        $pressure = str_repeat("\0", max(0, 30 * 1024 * 1024 - memory_get_usage(true)));
+        $raster->span(1, 0, 1, 0, 255, 0, 0.5, budget: $budget);
+        echo 'unexpected success';
+        exit(2);
+    }
+    if (($argv[1] ?? '') === 'lowered-limit') {
+        $budget = new Budget(new Limits);
+        $budget->allocation(1); // Warm any parsed-limit cache.
+        ini_set('memory_limit', '16M');
+        $budget->allocation(20 * 1024 * 1024);
+        echo 'unexpected success';
+        exit(2);
+    }
     if (in_array($argv[1] ?? '', ['late-group-row', 'late-page-row'], true)) {
         // Other live planes can consume headroom after shared blank rows were
         // created. First writes must preflight their copy-on-write row too.

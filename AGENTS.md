@@ -170,6 +170,16 @@ JPX, JBIG2 and CCITT are reported placeholders, not silently complete.
 - All16 blend modes operate in native group components; CMYK complements its
   components before blending. Native K is preserved. Page alpha is tracked
   before the white display background; combined fill/stroke is one object.
+- Plain pages have RGB rows only. A non-Normal paint triggers one replay with
+  page alpha, releasing the first raster/interpreter first. Both passes share
+  one Budget; discarded prefix operators still count against the cap. Normal
+  spans convert colour once per paint and coalesce only identical adjacent
+  coverage. One opaque-row cache requires equality of the WHOLE input row;
+  cached output is shared, so subsequent writes must preflight copy-on-write.
+- Memory preflights share one clock/memory snapshot. The parsed PHP limit is
+  cached only while its raw ini value matches. Long raster edges preflight
+  sparse row hash capacity before growth and tick by touched cells; very tall
+  sparse rasters preflight outer table growth too.
 - Chromium's group fixture collapses all four I/K combinations to the same
   isolated/nonknockout output. GoldenTest records the full discrepancy and
   compares its supported quadrant with the ORIGINAL bounds. Other quadrants

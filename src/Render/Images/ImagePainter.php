@@ -15,7 +15,14 @@ final class ImagePainter
 {
     public static function paint(SampledImage $image, Raster $raster, array $m, array $fill, Budget $budget, ?CoverageMask $clip = null, float $alpha = 1.0, ?GraphicsState $state = null): void
     {
-        $target = $raster->surface?->space ?? ColourSpace::rgb();
+        $mask = $image->hasMask() ? null : $state?->softMask;
+        $mode = $state?->blendMode ?? 'Normal';
+        $simple = $raster->surface === null && $mask === null && in_array($mode, ['Normal', 'Compatible'], true);
+        $direct = $simple && ! $image->stencil && $image->canPaintRgbDirectly();
+        $target = $direct ? null : ($raster->surface?->space ?? ColourSpace::rgb());
+        if ($simple && $image->stencil && $state !== null) {
+            $fill = $target->toRgb($state->fillSpace->convertTo($state->fill, $target));
+        }
         [$a, $b, $c, $d, $e, $f] = $m;
         $det = $a * $d - $b * $c;
         if (! is_finite($det) || abs($det) < 1e-20 || ! is_finite($e) || ! is_finite($f)) {
@@ -41,11 +48,19 @@ final class ImagePainter
                 $sy = min($image->height - 1, (int) floor((1 - $v) * $image->height));
                 $rgb = $image->pixel($sx, $sy, $fill, $target);
                 if ($rgb !== null) {
+                    if ($simple) {
+                        if (! $direct && ! $image->stencil) {
+                            $rgb = $target->toRgb($rgb);
+                        }
+                        $raster->span($y, $x, 1, $rgb[0], $rgb[1], $rgb[2], $alpha * $image->opacity($u, 1 - $v), $clip, $budget);
+
+                        continue;
+                    }
                     if ($image->stencil) {
                         $rgb = $state !== null ? $state->fillSpace->convertTo($state->fill, $target)
                             : ColourSpace::rgb()->convertTo(array_map(static fn ($v) => $v / 255, $rgb), $target);
                     }
-                    $raster->paint($y, $x, 1, $rgb, $target, $alpha, 1.0, $budget, $clip, $image->hasMask() ? null : $state?->softMask, $state?->blendMode ?? 'Normal', $state?->alphaIsShape ?? false, $image->opacity($u, 1 - $v), $image->maskIsShape());
+                    $raster->paint($y, $x, 1, $rgb, $target, $alpha, 1.0, $budget, $clip, $mask, $mode, $state?->alphaIsShape ?? false, $image->opacity($u, 1 - $v), $image->maskIsShape());
                 }
             }
         }
