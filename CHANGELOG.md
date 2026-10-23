@@ -8,11 +8,14 @@ BREAKING and says what a consumer must do.
 
 ## [Unreleased]
 
-## [0.1.0] - 2026-10-22
+## [0.1.0] - 2026-10-23
 
 First release. Install with `composer require particle-academy/fine-print`;
 there is no migration. Optional Laravel serving needs an app-owned resolver
 that authorises each file; see the README's service-provider example.
+
+Validation: 777 tests, 6049 assertions; reference compatibility against
+fancy-labs' document models; no PDF lab lane exists.
 
 ### Added
 
