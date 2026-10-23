@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace FinePrint\Tests\Support;
 
+use FinePrint\Agent;
+
 /**
  * The vector pages the renderer is compared against Chromium on.
  *
@@ -90,13 +92,13 @@ final class RenderFixtures
                     ."[10 5] 7 d 10 172 m 190 172 l S\n"
                     ."[2 4 12 4] 0 d 10 159 m 190 159 l S\n"
                     ."6 w 1 J [0 12] 0 d 10 142 m 190 142 l S\n"
-                    ."0 J 2 w [8 6] 0 d 0 0 0.8 RG ".self::circle(55, 75, 40, $k)." S\n"
+                    .'0 J 2 w [8 6] 0 d 0 0 0.8 RG '.self::circle(55, 75, 40, $k)." S\n"
                     ."0.8 0 0 RG 4 w 0 j [15 10] 3 d 110 40 70 70 re S\n",
             ],
             'transforms' => [
                 'mediaBox' => '[0 0 200 200]',
                 'content' => "q 0.866 0.5 -0.5 0.866 60 110 cm 0.9 0.4 0 rg -30 -15 60 30 re f Q\n"
-                    ."q 1 0 0 0.4 140 150 cm 0 0 0.6 RG 6 w ".self::circle(0, 0, 40, $k)." S Q\n"
+                    .'q 1 0 0 0.4 140 150 cm 0 0 0.6 RG 6 w '.self::circle(0, 0, 40, $k)." S Q\n"
                     ."q 1 0 0.5 1 20 20 cm 0.2 0.6 0.2 rg 0 0 60 50 re f Q\n"
                     ."q 2 0 0 2 120 20 cm q 0.5 g 0 0 20 20 re f Q 1 0 0 rg 10 10 20 20 re f Q\n",
             ],
@@ -132,7 +134,7 @@ final class RenderFixtures
                     ."0.2 0.4 0 0.1 k 10 5 85 40 re f\n"
                     ."0 0 0 0.5 k 105 5 80 40 re f\n",
             ],
-        ];
+        ] + TransparencyFixtures::all();
     }
 
     /**
@@ -181,7 +183,7 @@ final class RenderFixtures
         }
         $blocks[] = ['type' => 'paragraph', 'runs' => [['text' => 'Large: Rag 36', 'font' => 'DejaVu Sans', 'size' => 36, 'bold' => false]]];
 
-        return \FinePrint\Agent::toBytes(['blocks' => $blocks], ['fonts' => ['DejaVu Sans' => self::DEJAVU]]);
+        return Agent::toBytes(['blocks' => $blocks], ['fonts' => ['DejaVu Sans' => self::DEJAVU]]);
     }
 
     /** The text fixtures' PDF bytes. */
@@ -199,7 +201,7 @@ final class RenderFixtures
                 ]],
             ];
 
-            return \FinePrint\Agent::toBytes(['blocks' => $blocks], ['fonts' => ['Fp' => FontBuilder::outlined()]]);
+            return Agent::toBytes(['blocks' => $blocks], ['fonts' => ['Fp' => FontBuilder::outlined()]]);
         }
 
         if ($name === 'std14') {
@@ -211,7 +213,7 @@ final class RenderFixtures
             $faces = ['Helvetica', 'Helvetica-Bold', 'Helvetica-Oblique', 'Helvetica-BoldOblique',
                 'Times-Roman', 'Times-Bold', 'Times-Italic', 'Times-BoldItalic',
                 'Courier', 'Courier-Bold', 'Courier-Oblique', 'Courier-BoldOblique'];
-            $b = new PdfBuilder();
+            $b = new PdfBuilder;
             $cat = $b->reserve();
             $tree = $b->reserve();
             $res = '';
@@ -234,7 +236,7 @@ final class RenderFixtures
         // 'glyphs': written here, origins on half points.
         $outlined = FontBuilder::outlined();
         $square = FontBuilder::make();
-        $b = new PdfBuilder();
+        $b = new PdfBuilder;
         $cat = $b->reserve();
         $tree = $b->reserve();
         $simple = function (string $program, string $name, string $extra) use ($b): int {

@@ -7,6 +7,7 @@ use FinePrint\Render\Renderer;
 use FinePrint\Tests\Support\ImageDiff;
 use FinePrint\Tests\Support\PngReader;
 use FinePrint\Tests\Support\RenderFixtures;
+use FinePrint\Tests\Support\TransparencyFixtures;
 
 /*
  * Golden comparisons against Chromium (PDFium), the reference P2 already found
@@ -130,9 +131,11 @@ function fpGolden(string $name, int $scale, ?string $pdf = null): array
 }
 
 $cases = [];
-foreach (RenderFixtures::SCALES as $name => $scales) {
+// Transparency bounds fixed BEFORE its first oracle run: same MAE <= 2.0 and
+// >64 mismatch <= 1% as vector goldens, including every one of the 16 modes.
+foreach (RenderFixtures::SCALES + TransparencyFixtures::scales() as $name => $scales) {
     foreach ($scales as $s) {
-        if ($name !== 'cmyk') {
+        if (! in_array($name, ['cmyk', 'transparency-groups'], true)) {
             $cases["{$name}@{$s}x"] = [$name, $s];
         }
     }
@@ -144,6 +147,38 @@ it('matches Chromium within tolerance', function (string $name, int $scale) {
     expect($d['mae'])->toBeLessThanOrEqual(FP_GOLDEN_MAE, sprintf('%s@%dx MAE %.3f', $name, $scale, $d['mae']))
         ->and($d['mismatch'])->toBeLessThanOrEqual(FP_GOLDEN_MISMATCH, sprintf('%s@%dx mismatched %.3f%%', $name, $scale, $d['mismatch'] * 100));
 })->with($cases);
+
+/*
+ * MEASURED ORACLE LIMIT, discovered on the first transparency run, 2026-10-23:
+ * Chromium 156 paints all FOUR I/K quadrants identically, as isolated and
+ * non-knockout. Whole-page MAE was14.16/13.88 and mismatch26.16%/25.64%.
+ * The bounds were NOT relaxed. The Chromium comparison is now confined to
+ * the isolated non-knockout quadrant; the other quadrants are pinned by the
+ * independently expanded ISO11.4 pixel equations in TransparencyTest.
+ * Primary source: PDFium's CPDF_Transparency has group/isolated flags, no K:
+ * https://pdfium.googlesource.com/pdfium/+/refs/heads/main/core/fpdfapi/page/cpdf_transparency.h
+ * Non-isolation being ineffective here is an observation of this oracle,
+ * not a claim about every PDFium renderer or configuration.
+ */
+it('matches Chromium for its supported isolated non-knockout group quadrant', function (int $scale) {
+    fpGolden('transparency-groups', $scale); // Preserve the FULL discrepancy in the report/diff.
+    $golden = PngReader::read((string) file_get_contents(dirname(__DIR__, 2).'/golden/transparency-groups@'.$scale.'x.png'));
+    $r = Renderer::render(RenderFixtures::pdf('transparency-groups'), scale: $scale);
+    $side = 100 * $scale;
+    $crop = static function (array $rows) use ($side): array {
+        return array_map(static fn ($row) => substr($row, $side * 3, $side * 3), array_slice($rows, $side, $side));
+    };
+    $d = ImageDiff::compare($crop($r->rows()), $crop($golden['rgb']), $side, $side);
+    expect($d['mae'])->toBeLessThanOrEqual(FP_GOLDEN_MAE)
+        ->and($d['mismatch'])->toBeLessThanOrEqual(FP_GOLDEN_MISMATCH);
+    // Regenerating with a more capable oracle must revisit this exception.
+    $reference = $crop($golden['rgb']);
+    foreach ([[0, 0], [0, $side], [$side, 0]] as [$x, $y]) {
+        $quadrant = array_map(static fn ($row) => substr($row, $x * 3, $side * 3), array_slice($golden['rgb'], $y, $side));
+        $same = ImageDiff::compare($quadrant, $reference, $side, $side);
+        expect((float) $same['mae'])->toBe(0.0)->and($same['max'])->toBe(0);
+    }
+})->with([1, 2]);
 
 it('matches Chromium\'s geometry for CMYK, whose colours are expected to differ', function () {
     // Our CMYK is the naive formula (plan, P3); PDFium approximates a press

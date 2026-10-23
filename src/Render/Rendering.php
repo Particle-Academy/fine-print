@@ -33,7 +33,7 @@ use FinePrint\Budget;
  * | `text-type3` | text in a Type 3 font |
  * | `text-unembedded` | text in a font with no program in the file that no bundled font stands in for (Symbol, ZapfDingbats, any non-standard face) |
  * | `text-vertical` | vertical text (Identity-V, WMode 1) |
- * | `transparency` | unsupported Form groups, ExtGState soft masks or blend modes (approximated) |
+ * | `transparency` | unknown group spaces/blends, unsupported mask functions, calibrated luminosity masks or TK=false text |
  *
  * Counts are per operator (or per annotation): `text-unembedded: 12` is
  * twelve show operators, not twelve characters. `text-glyph` counts glyphs.

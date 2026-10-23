@@ -20,7 +20,7 @@ const jobs = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '.out', 'orac
 async function shot(browser, pdf, job, out) {
   const ctx = await browser.newContext({ viewport: job.viewport, deviceScaleFactor: 1 });
   const page = await ctx.newPage();
-  const url = 'file:///' + pdf.replace(/\\/g, '/') + '#toolbar=0&zoom=' + job.zoom;
+  const url = 'file:///' + pdf.replace(/\\/g, '/') + '#toolbar=0&page=' + (job.page || 1) + '&zoom=' + job.zoom;
   await page.goto(url, { waitUntil: 'load' }).catch(() => {});
   await page.waitForTimeout(2500);
   await page.screenshot({ path: out });

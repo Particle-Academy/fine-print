@@ -21,7 +21,8 @@ use FinePrint\Render\PngEncoder;
 use FinePrint\Tests\Support\PngReader;
 
 $work = dirname(__DIR__).'/.out/oracle';
-$golden = dirname(__DIR__).'/golden';
+$golden = getenv('ORACLE_GOLDEN_DIR') ?: dirname(__DIR__).'/golden';
+is_dir($golden) || mkdir($golden, 0777, true);
 $jobs = json_decode((string) file_get_contents("{$work}/jobs.json"), true);
 $failed = false;
 

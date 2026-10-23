@@ -40,7 +40,7 @@ final class GraphicsState
 
     public float $dashPhase = 0.0;
 
-    /** Supported constant alpha; unsupported soft-mask groups/blend modes are reported. */
+    /** Constant alpha, independent stroke/fill values; AIS determines shape/opacity. */
     public float $strokeAlpha = 1.0;
 
     public float $fillAlpha = 1.0;
@@ -48,6 +48,14 @@ final class GraphicsState
     public bool $unsupportedMask = false;
 
     public bool $unsupportedBlend = false;
+
+    public string $blendMode = 'Normal';
+
+    public ?CoverageMask $softMask = null;
+
+    public bool $alphaIsShape = false;
+
+    public bool $textKnockout = true;
 
     public ?CoverageMask $clip = null;
 

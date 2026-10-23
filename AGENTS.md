@@ -153,9 +153,27 @@ JPX, JBIG2 and CCITT are reported placeholders, not silently complete.
   (up to four inputs/outputs, every PDF sample depth). Size is judged before
   decoding, interpolation work is weighted into the render budget. Calculator
   functions and cubic sampled interpolation remain reported approximations.
-- Blend modes, ExtGState soft-mask groups and Form transparency groups remain
-  reported approximations. Never remove their skipped entry just because a
-  constant alpha or image SMask is supported.
+- `GroupSurface` stores associated native colour, alpha and shape in packed
+  floats, excluding its borrowed initial backdrop (ISO11.4). Group opacity,
+  BM and SMask apply ONCE at invocation; those three reset inside, AIS does not.
+  Knockout uses shape, including zero-opacity objects, and a nested nonisolated
+  group in a knockout parent inherits the parent's INITIAL backdrop.
+- Group/mask buffers crop to a transformed, canvas-clipped rectangle before
+  allocation, and share `Budget::reservePixels` with the page. Saved masks
+  retain their reservation until the last graphics-state reference is gone.
+  Every new plane reserves physical memory-limit headroom and row overhead.
+- ExtGState masks freeze their CTM at `gs`, derive Alpha or device Luminosity,
+  honour BC and bounded type0/2/3 or Identity TR. The defined value outside
+  the group (including TR(0) or TR(lum(BC))) survives sparse storage. Image
+  Mask/SMask overrides the graphics-state mask. TK=false text, calibrated
+  luminosity masks, calculator transfers and unknown modes/spaces stay skipped.
+- All16 blend modes operate in native group components; CMYK complements its
+  components before blending. Native K is preserved. Page alpha is tracked
+  before the white display background; combined fill/stroke is one object.
+- Chromium's group fixture collapses all four I/K combinations to the same
+  isolated/nonknockout output. GoldenTest records the full discrepancy and
+  compares its supported quadrant with the ORIGINAL bounds. Other quadrants
+  use independent hand-expanded ISO pixel values, proved red by ignoring I/K.
 - `Budget::allocation` judges worst-case bytes BEFORE allocation, including
   per-row string/array overhead and PHP memory_limit headroom. Raster, clip
   masks and JPEG planes all use it. A thin/tall page can pass a pixel cap yet

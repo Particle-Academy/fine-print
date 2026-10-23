@@ -24,6 +24,8 @@ final class Budget
 
     private int $ticks = 0;
 
+    private int $renderPixels = 0;
+
     /** @param string $activity what is being budgeted, for refusal messages ("Reading", "Rendering") */
     public function __construct(public readonly Limits $limits, private readonly string $activity = 'Reading')
     {
@@ -72,6 +74,20 @@ final class Budget
         $this->check();
 
         return max(0.0, ($this->deadline - hrtime(true)) / 1e9);
+    }
+
+    /** Page, live offscreen groups and installed soft masks share one pixel cap. */
+    public function reservePixels(int $pixels): void
+    {
+        if ($pixels > $this->limits->maxRenderPixels - $this->renderPixels) {
+            throw new RefusedException('too_many_pixels', 'Live rendering buffers exceed the pixel limit.');
+        }
+        $this->renderPixels += $pixels;
+    }
+
+    public function releasePixels(int $pixels): void
+    {
+        $this->renderPixels -= $pixels;
     }
 
     public function remainingMemory(): int

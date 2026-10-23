@@ -10,7 +10,7 @@ use FinePrint\Exceptions\RefusedException;
 use FinePrint\Objects\PdfDict;
 use FinePrint\Objects\PdfStream;
 
-/** Bounded numeric PDF functions: type 2 and multilinear sampled type 0 only. */
+/** Bounded numeric PDF functions: exponential 2, linear sampled 0, stitching 3. */
 final class TintFunction
 {
     private function __construct(
@@ -26,6 +26,18 @@ final class TintFunction
 
     public static function load(mixed $value, Document $doc, Budget $budget, int $inputs, int $outputs): ?self
     {
+        $nodes = 0;
+
+        return self::parse($value, $doc, $budget, $inputs, $outputs, 0, $nodes);
+    }
+
+    private static function parse(mixed $value, Document $doc, Budget $budget, int $inputs, int $outputs, int $depth, int &$nodes): ?self
+    {
+        $budget->tick();
+        if ($depth > 8 || ++$nodes > 256) {
+            return null;
+        }
+        $budget->allocation(4096);
         $value = $doc->resolve($value);
         $dict = $value instanceof PdfStream ? $value->dict : $value;
         if (! $dict instanceof PdfDict || $inputs < 1 || $inputs > 4 || $outputs < 1 || $outputs > 4) {
@@ -49,6 +61,34 @@ final class TintFunction
                     return null;
                 }
             }
+        }
+        if ($type === 3 && $inputs === 1) {
+            $functions = $get('Functions');
+            if (! is_array($functions) || count($functions) < 1 || count($functions) > 32) {
+                return null;
+            }
+            $bounds = self::numbers($get('Bounds'), count($functions) - 1, $doc);
+            $encode = self::numbers($get('Encode'), count($functions) * 2, $doc);
+            if ($bounds === null || $encode === null) {
+                return null;
+            }
+            $edges = [$domain[0], ...$bounds, $domain[1]];
+            for ($i = 1; $i < count($edges); $i++) {
+                if ($edges[$i] <= $edges[$i - 1] || ! is_finite($edges[$i] - $edges[$i - 1])
+                    || ! is_finite($encode[2 * ($i - 1) + 1] - $encode[2 * ($i - 1)])) {
+                    return null;
+                }
+            }
+            $children = [];
+            foreach ($functions as $function) {
+                $child = self::parse($function, $doc, $budget, 1, $outputs, $depth + 1, $nodes);
+                if ($child === null) {
+                    return null;
+                }
+                $children[] = $child;
+            }
+
+            return new self(3, 1, $outputs, $domain, $range, [$children, $edges, $encode], '', $budget);
         }
         if ($type === 2 && $inputs === 1) {
             $c0 = self::numbers($get('C0') ?? [0], $outputs, $doc);
@@ -119,7 +159,16 @@ final class TintFunction
         for ($i = 0; $i < $this->inputs; $i++) {
             $values[$i] = max($this->domain[2 * $i], min($this->domain[2 * $i + 1], $values[$i] ?? 0));
         }
-        if ($this->type === 2) {
+        if ($this->type === 3) {
+            [$children, $edges, $encode] = $this->options;
+            $i = 0;
+            while ($i < count($children) - 1 && $values[0] >= $edges[$i + 1]) {
+                $this->budget->tick();
+                $i++;
+            }
+            $fraction = ($values[0] - $edges[$i]) / ($edges[$i + 1] - $edges[$i]);
+            $out = $children[$i]->evaluate([$encode[2 * $i] + $fraction * ($encode[2 * $i + 1] - $encode[2 * $i])]);
+        } elseif ($this->type === 2) {
             [$c0, $c1, $n] = $this->options;
             $power = pow($values[0], $n);
             $out = [];

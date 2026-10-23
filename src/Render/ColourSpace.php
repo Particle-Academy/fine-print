@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace FinePrint\Render;
 
-use FinePrint\Document;
 use FinePrint\Budget;
+use FinePrint\Document;
 use FinePrint\Objects\PdfDict;
 use FinePrint\Objects\PdfName;
 use FinePrint\Objects\PdfStream;
@@ -27,6 +27,7 @@ final class ColourSpace
         public readonly int $components,
         private readonly ?self $alternate = null,
         private readonly ?TintFunction $function = null,
+        public readonly bool $calibrated = false,
     ) {}
 
     public static function gray(): self
@@ -42,6 +43,30 @@ final class ColourSpace
     public static function cmyk(): self
     {
         return new self('cmyk', 4);
+    }
+
+    /** Native components through the renderer's device-space conversion policy. */
+    public function convertTo(array $c, self $target): array
+    {
+        $c = array_map(static fn ($v) => max(0.0, min(1.0, (float) $v)), $c);
+        if ($this->kind === 'alternate') {
+            return $this->alternate->convertTo($this->function->evaluate($c), $target);
+        }
+        if ($this->kind === $target->kind) {
+            return array_map(static fn ($v) => max(0.0, min(1.0, (float) $v)), $c);
+        }
+        $rgb = match ($this->kind) {
+            'rgb' => $c,
+            'gray' => [$c[0], $c[0], $c[0]],
+            'cmyk' => [(1 - $c[0]) * (1 - $c[3]), (1 - $c[1]) * (1 - $c[3]), (1 - $c[2]) * (1 - $c[3])],
+            default => array_map(static fn ($v) => $v / 255, $this->toRgb($c)),
+        };
+
+        return match ($target->kind) {
+            'gray' => [BlendMode::lum($rgb)],
+            'cmyk' => [1 - $rgb[0], 1 - $rgb[1], 1 - $rgb[2], 0.0],
+            default => $rgb,
+        };
     }
 
     /** @return list<float> the initial colour for this space (ISO 32000-1 8.6.5.1, 8.6.6.2...) */
@@ -104,20 +129,20 @@ final class ColourSpace
 
         switch ($family) {
             case 'CalGray':
-                return self::gray();
+                return new self('gray', 1, calibrated: true);
             case 'CalRGB':
-                return self::rgb();
+                return new self('rgb', 3, calibrated: true);
             case 'ICCBased':
                 $stream = $doc->resolve($v[1] ?? null);
                 $n = $stream instanceof PdfStream ? $doc->resolve($stream->dict->get('N')) : null;
                 if ($n === 1) {
-                    return self::gray();
+                    return new self('gray', 1, calibrated: true);
                 }
                 if ($n === 3) {
-                    return self::rgb();
+                    return new self('rgb', 3, calibrated: true);
                 }
                 if ($n === 4) {
-                    return self::cmyk();
+                    return new self('cmyk', 4, calibrated: true);
                 }
 
                 return $stream instanceof PdfStream && $stream->dict->has('Alternate')

@@ -2,8 +2,8 @@
 
 declare(strict_types=1);
 
-use FinePrint\Render\Renderer;
 use FinePrint\Exceptions\RefusedException;
+use FinePrint\Render\Renderer;
 use FinePrint\Tests\Support\PdfBuilder;
 
 it('clips subsequent painting to the nonzero path', function () {
@@ -113,10 +113,11 @@ it('reports recursive image masks instead of following them', function () {
     expect(Renderer::render($pdf)->complete())->toBeFalse();
 });
 
-it('reports transparency groups that are outside the supported alpha subset', function () {
+it('composites a transparency group with its invocation alpha once', function () {
     $pdf = fprPage('0 0 1 rg 0 0 100 100 re f /Half gs /Form Do', resources: '/ExtGState << /Half << /ca 0.5 >> >> /XObject << /Form 6 0 R >>', extra: fn (PdfBuilder $b) => $b->stream('1 0 0 rg 0 0 50 50 re f 20 0 50 50 re f', '/Subtype /Form /BBox [0 0 100 100] /Group << /S /Transparency /I true >>'));
     $r = Renderer::render($pdf);
-    expect($r->complete())->toBeFalse()->and(array_column($r->skipped, 'kind'))->toContain('transparency');
+    expect($r->complete())->toBeTrue()->and($r->pixel(10, 75))->toBe([128, 0, 128])
+        ->and($r->pixel(30, 75))->toBe([128, 0, 128]);
 });
 
 it('bounds saved clipping masks by the render memory budget', function () {
@@ -130,13 +131,13 @@ it('bounds saved clipping masks by the render memory budget', function () {
 });
 
 it('tracks unsupported blend modes independently of soft-mask resets', function (string $ops, bool $complete) {
-    $pdf = fprPage($ops.' 0 0 100 100 re f', resources: '/ExtGState << /Multiply << /BM /Multiply >> /NoMask << /SMask /None >> /Normal << /BM /Normal >> >>');
+    $pdf = fprPage($ops.' 0 0 100 100 re f', resources: '/ExtGState << /Unknown << /BM /Unknown >> /NoMask << /SMask /None >> /Normal << /BM /Normal >> >>');
     $r = Renderer::render($pdf);
     expect($r->complete())->toBe($complete);
     if (! $complete) {
         expect(array_column($r->skipped, 'kind'))->toContain('transparency');
     }
 })->with([
-    'mask reset preserves blend' => ['/Multiply gs /NoMask gs', false],
-    'normal clears blend' => ['/Multiply gs /Normal gs', true],
+    'mask reset preserves unsupported blend' => ['/Unknown gs /NoMask gs', false],
+    'normal clears unsupported blend' => ['/Unknown gs /Normal gs', true],
 ]);

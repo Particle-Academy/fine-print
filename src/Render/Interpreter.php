@@ -14,13 +14,13 @@ use FinePrint\Objects\PdfName;
 use FinePrint\Objects\PdfRef;
 use FinePrint\Objects\PdfStream;
 use FinePrint\Objects\PdfString;
+use FinePrint\Parser\Keyword;
+use FinePrint\Parser\Parser;
+use FinePrint\Parser\PdfSyntaxException;
 use FinePrint\Render\Glyphs\RenderFont;
 use FinePrint\Render\Images\ImagePainter;
 use FinePrint\Render\Images\InlineImageReader;
 use FinePrint\Render\Images\SampledImage;
-use FinePrint\Parser\Keyword;
-use FinePrint\Parser\Parser;
-use FinePrint\Parser\PdfSyntaxException;
 use FinePrint\Text\TextExtractor;
 use Generator;
 
@@ -100,17 +100,33 @@ final class Interpreter
     /** @param list<float> $baseMatrix default user space to device pixels */
     public function __construct(
         private readonly Document $doc,
-        private readonly Raster $raster,
+        private Raster $raster,
         private readonly Budget $budget,
         array $baseMatrix,
     ) {
-        $this->gs = new GraphicsState();
+        $this->gs = new GraphicsState;
         $this->gs->ctm = $baseMatrix;
-        $this->path = new Path();
+        $this->path = new Path;
     }
 
-    public function run(string $content, ?PdfDict $resources): void
+    public function run(string $content, ?PdfDict $resources, ?PdfDict $pageGroup = null): void
     {
+        if ($pageGroup !== null && $pageGroup->name('S') === 'Transparency') {
+            $space = $this->groupSpace($pageGroup, $resources);
+            if ($space->kind !== 'rgb' || $this->doc->resolve($pageGroup->get('K')) === true) {
+                $parent = $this->raster;
+                $offscreen = Raster::group($parent, $space, true, $this->doc->resolve($pageGroup->get('K')) === true, $this->budget);
+                $this->raster = $offscreen;
+                try {
+                    $this->execute($this->operations($content), $resources);
+                } finally {
+                    $this->raster = $parent;
+                }
+                $parent->composite($offscreen, new GraphicsState, $this->budget);
+
+                return;
+            }
+        }
         $this->execute($this->operations($content), $resources);
     }
 
@@ -251,7 +267,7 @@ final class Interpreter
 
                 return;
 
-            // --- colour -------------------------------------------------------
+                // --- colour -------------------------------------------------------
             case 'g': case 'G': case 'rg': case 'RG': case 'k': case 'K':
                 $space = match (strtolower($op)) {
                     'g' => ColourSpace::gray(),
@@ -283,7 +299,7 @@ final class Interpreter
 
                 return;
 
-            // --- path construction --------------------------------------------
+                // --- path construction --------------------------------------------
             case 'm':
                 if (($n = self::numbers($o, 2)) !== null) {
                     $this->path->moveTo($n[0], $n[1]);
@@ -325,7 +341,7 @@ final class Interpreter
 
                 return;
 
-            // --- painting -------------------------------------------------------
+                // --- painting -------------------------------------------------------
             case 'f': case 'F': case 'f*':
                 $this->fill($op === 'f*');
                 $this->endPath();
@@ -343,15 +359,19 @@ final class Interpreter
 
                 return;
             case 'B': case 'B*':
-                $this->fill($op === 'B*');
-                $this->stroke();
+                $this->atomic(function () use ($op) {
+                    $this->fill($op === 'B*');
+                    $this->stroke();
+                });
                 $this->endPath();
 
                 return;
             case 'b': case 'b*':
                 $this->path->close();
-                $this->fill($op === 'b*');
-                $this->stroke();
+                $this->atomic(function () use ($op) {
+                    $this->fill($op === 'b*');
+                    $this->stroke();
+                });
                 $this->endPath();
 
                 return;
@@ -364,7 +384,7 @@ final class Interpreter
 
                 return;
 
-            // --- text (P3b) ----------------------------------------------------
+                // --- text (P3b) ----------------------------------------------------
             case 'BT':
                 $this->tm = $this->tlm = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0];
                 $this->textClip = null;
@@ -472,7 +492,7 @@ final class Interpreter
 
                 return;
 
-            // --- everything not drawn yet --------------------------------------
+                // --- everything not drawn yet --------------------------------------
             case 'sh':
                 $this->skip('shading');
 
@@ -564,14 +584,30 @@ final class Interpreter
         if (($v = $num('ca')) !== null) {
             $gs->fillAlpha = max(0.0, min(1.0, $v));
         }
+        if (is_bool($ais = $this->doc->resolve($gsDict->get('AIS')))) {
+            $gs->alphaIsShape = $ais;
+        }
+        if (is_bool($tk = $this->doc->resolve($gsDict->get('TK')))) {
+            $gs->textKnockout = $tk;
+        }
         if ($gsDict->has('SMask')) {
             $mask = $this->doc->resolve($gsDict->get('SMask'));
-            $gs->unsupportedMask = ! ($mask instanceof PdfName && $mask->value === 'None');
+            $gs->softMask = $mask instanceof PdfDict ? $this->softMask($mask, $resources) : null;
+            $gs->unsupportedMask = $gs->softMask === null && ! ($mask instanceof PdfName && $mask->value === 'None');
         }
         if ($gsDict->has('BM')) {
             $bm = $this->doc->resolve($gsDict->get('BM'));
-            $bm = is_array($bm) ? $this->doc->resolve($bm[0] ?? null) : $bm;
-            $gs->unsupportedBlend = ! ($bm instanceof PdfName && in_array($bm->value, ['Normal', 'Compatible'], true));
+            $gs->unsupportedBlend = true;
+            $gs->blendMode = 'Normal';
+            foreach (is_array($bm) ? $bm : [$bm] as $candidate) {
+                $this->budget->tick();
+                $candidate = $this->doc->resolve($candidate);
+                if ($candidate instanceof PdfName && in_array($candidate->value, BlendMode::NAMES, true)) {
+                    $gs->blendMode = $candidate->value;
+                    $gs->unsupportedBlend = false;
+                    break;
+                }
+            }
         }
     }
 
@@ -657,15 +693,17 @@ final class Interpreter
             },
             $this->budget,
         );
-        $this->blit($r, false, $rgb, $this->gs->strokeAlpha);
+        $this->blit($r, false, $rgb, $this->gs->strokeAlpha, true);
     }
 
     /** @param array{0: int, 1: int, 2: int} $rgb */
-    private function blit(Rasterizer $r, bool $evenOdd, array $rgb, float $alpha): void
+    private function blit(Rasterizer $r, bool $evenOdd, array $rgb, float $alpha, bool $stroke = false): void
     {
-        [$cr, $cg, $cb] = $rgb;
+        $gs = $this->gs;
+        $colour = $stroke ? $gs->stroke : $gs->fill;
+        $space = $stroke ? $gs->strokeSpace : $gs->fillSpace;
         foreach ($r->spans($evenOdd) as [$y, $x, $len, $a]) {
-            $this->raster->span($y, $x, $len, $cr, $cg, $cb, $a * $alpha, $this->gs->clip, $this->budget);
+            $this->raster->paint($y, $x, $len, $colour, $space, $alpha, $a, $this->budget, $gs->clip, $gs->softMask, $gs->blendMode, $gs->alphaIsShape);
         }
     }
 
@@ -674,8 +712,29 @@ final class Interpreter
         if ($this->pendingClip !== null) {
             $this->clipPath($this->path, $this->pendingClip);
         }
-        $this->path = new Path();
+        $this->path = new Path;
         $this->pendingClip = null;
+    }
+
+    /** Fill/stroke portions of one object must never composite with one another. */
+    private function atomic(callable $paint, ?array $region = null): void
+    {
+        $gs = $this->gs;
+        if ($gs->fillAlpha === 1.0 && $gs->strokeAlpha === 1.0 && $gs->softMask === null
+            && in_array($gs->blendMode, ['Normal', 'Compatible'], true)) {
+            $paint();
+
+            return;
+        }
+        $parent = $this->raster;
+        $group = Raster::group($parent, $parent->surface?->space ?? ColourSpace::rgb(), false, true, $this->budget, region: $region);
+        $this->raster = $group;
+        try {
+            $paint();
+        } finally {
+            $this->raster = $parent;
+        }
+        $parent->composite($group, new GraphicsState, $this->budget);
     }
 
     private function clipPath(Path $path, bool $evenOdd): void
@@ -760,6 +819,9 @@ final class Interpreter
             $this->skipFont((string) $font->skip, $font->name);
         }
         $draw = $font->drawable() && ($fillOn || $strokeOn);
+        if ($draw && ! $gs->textKnockout) {
+            $this->skip('transparency');
+        }
         $fillRgb = $draw && $fillOn ? $this->paint(false) : null;
         $strokeRgb = $draw && $strokeOn ? $this->paint(true) : null;
         $draw = $fillRgb !== null || $strokeRgb !== null;
@@ -850,17 +912,25 @@ final class Interpreter
                 $this->textClip->addFlat($poly);
             }
         }
-        if ($fillRgb !== null) {
-            $r = new Rasterizer($this->raster->width, $this->raster->height, $this->budget);
-            foreach (Path::flattenSubpaths($o->subpaths, $m, self::TOLERANCE) as $poly) {
-                $r->addFlat($poly);
+        $paint = function () use ($fillRgb, $strokeRgb, $o, $m, $g, $deviceYShift) {
+            if ($fillRgb !== null) {
+                $r = new Rasterizer($this->raster->width, $this->raster->height, $this->budget);
+                foreach (Path::flattenSubpaths($o->subpaths, $m, self::TOLERANCE) as $poly) {
+                    $r->addFlat($poly);
+                }
+                $this->blit($r, false, $fillRgb, $this->gs->fillAlpha);
             }
-            $this->blit($r, false, $fillRgb, $this->gs->fillAlpha);
-        }
-        if ($strokeRgb !== null) {
-            // Translate the stroker's device matrix, preserving the user-space
-            // pen shape even under rotated, skewed or singular CTMs.
-            $this->stroke(Path::fromSubpaths($o->subpaths, $g), $strokeRgb, $deviceYShift);
+            if ($strokeRgb !== null) {
+                // Translate the stroker's device matrix, preserving the user-space
+                // pen shape even under rotated, skewed or singular CTMs.
+                $this->stroke(Path::fromSubpaths($o->subpaths, $g), $strokeRgb, $deviceYShift);
+            }
+        };
+        if ($fillRgb !== null && $strokeRgb !== null) {
+            $region = self::deviceBounds([min($xs) - $margin, min($ys) - $margin, max($xs) + $margin, max($ys) + $margin], [1, 0, 0, 1, 0, 0], $this->raster->width, $this->raster->height);
+            $this->atomic($paint, $region);
+        } else {
+            $paint();
         }
     }
 
@@ -911,25 +981,31 @@ final class Interpreter
             return;
         }
 
+        $this->form($x, $ref, $resources);
+    }
+
+    /** Render one form; a soft-mask caller receives its offscreen group. */
+    private function form(PdfStream $x, mixed $ref, ?PdfDict $resources, bool $mask = false, ?array $backdrop = null): ?Raster
+    {
         $key = $ref instanceof PdfRef ? $ref->key() : 'd'.spl_object_id($x);
         if (in_array($key, $this->forms, true)) {
             $this->doc->warn('form XObject '.$key.' draws itself; the inner draw was skipped');
             $this->skip('form-depth');
 
-            return;
+            return null;
         }
         if (count($this->forms) >= $this->budget->limits->maxFormDepth) {
             $this->doc->warn('form XObjects nest deeper than '.$this->budget->limits->maxFormDepth.'; the rest were skipped');
             $this->skip('form-depth');
 
-            return;
+            return null;
         }
 
         $ops = $this->formOps[$key] ?? null;
         if ($ops === null) {
-            $content = $this->doc->streamData($x);
+            $content = $this->doc->streamData($x, $this->budget);
             if ($content === null) {
-                return;
+                return null;
             }
             if (strlen($content) <= self::FORM_CACHE_BYTES && $this->cachedOps < 500_000) {
                 $ops = iterator_to_array($this->operations($content), false);
@@ -941,7 +1017,7 @@ final class Interpreter
         }
 
         $formResources = $this->doc->resolve($x->dict->get('Resources'));
-        $saved = [$this->gs, $this->stack, $this->stackOverflow, $this->path, $this->pendingClip, $this->textClip, $this->textClipPending];
+        $saved = [$this->gs, $this->stack, $this->stackOverflow, $this->path, $this->pendingClip, $this->textClip, $this->textClipPending, $this->raster, $this->tm, $this->tlm];
         $this->gs = clone $this->gs;
         $matrix = $this->doc->resolve($x->dict->get('Matrix'));
         if (is_array($matrix) && ($m = self::numbers(array_map(fn ($v) => $this->doc->resolve($v), $matrix), 6)) !== null) {
@@ -949,16 +1025,39 @@ final class Interpreter
         }
         $this->stack = [];
         $this->stackOverflow = 0;
-        $this->path = new Path();
+        $this->path = new Path;
         $this->pendingClip = null;
         $this->textClip = null;
         $this->textClipPending = false;
-        $group = $this->doc->resolve($x->dict->get('Group'));
-        if ($group instanceof PdfDict && $group->name('S') === 'Transparency') {
-            $this->skip('transparency');
-        }
         $box = $this->doc->resolve($x->dict->get('BBox'));
-        if (is_array($box) && ($n = self::numbers(array_map(fn ($v) => $this->doc->resolve($v), $box), 4)) !== null) {
+        $boxNumbers = is_array($box) ? self::numbers(array_map(fn ($v) => $this->doc->resolve($v), $box), 4) : null;
+        $region = $boxNumbers !== null ? self::deviceBounds($boxNumbers, $this->gs->ctm, $this->raster->width, $this->raster->height) : null;
+        $group = $this->doc->resolve($x->dict->get('Group'));
+        $offscreen = null;
+        if ($group instanceof PdfDict && $group->name('S') === 'Transparency') {
+            $space = $this->groupSpace($group, $formResources instanceof PdfDict ? $formResources : $resources);
+            $isolated = $this->doc->resolve($group->get('I')) === true;
+            if (! $mask && ($this->gs->unsupportedBlend || $this->gs->unsupportedMask)) {
+                $this->skip('transparency');
+            }
+            $knockout = $this->doc->resolve($group->get('K')) === true;
+            // Group invariance (11.4.4 note 5) is exact, and avoids allocating a
+            // page-sized buffer for the common normal Quartz wrapper form.
+            $invariant = ! $mask && ! $isolated && $knockout === ($this->raster->surface?->knockout ?? false)
+                && $space->kind === ($this->raster->surface?->space->kind ?? 'rgb')
+                && $this->gs->fillAlpha === 1.0 && $this->gs->softMask === null
+                && in_array($this->gs->blendMode, ['Normal', 'Compatible'], true);
+            if (! $invariant) {
+                $offscreen = Raster::group($this->raster, $space, $isolated || ($mask && $backdrop === null), $knockout, $this->budget, $isolated ? null : $backdrop, $region);
+                $this->raster = $offscreen;
+            }
+            // The invocation's transparency is applied to the finished group once.
+            $this->gs->fillAlpha = $this->gs->strokeAlpha = 1.0;
+            $this->gs->blendMode = 'Normal';
+            $this->gs->softMask = null;
+            $this->gs->unsupportedBlend = $this->gs->unsupportedMask = false;
+        }
+        if (($n = $boxNumbers) !== null) {
             $m = $this->gs->ctm;
             $xs = [$n[0] * $m[0] + $n[1] * $m[2] + $m[4], $n[2] * $m[0] + $n[3] * $m[2] + $m[4]];
             $ys = [$n[0] * $m[1] + $n[1] * $m[3] + $m[5], $n[2] * $m[1] + $n[3] * $m[3] + $m[5]];
@@ -966,7 +1065,7 @@ final class Interpreter
                 && (($m[1] === 0.0 && $m[2] === 0.0) || ($m[0] === 0.0 && $m[3] === 0.0))
                 && min($xs) <= 0 && min($ys) <= 0 && max($xs) >= $this->raster->width && max($ys) >= $this->raster->height;
             if (! $coversPage) {
-                $clipPath = new Path();
+                $clipPath = new Path;
                 $clipPath->rect($n[0], $n[1], max(0, $n[2] - $n[0]), max(0, $n[3] - $n[1]));
                 $this->clipPath($clipPath, false);
             }
@@ -978,8 +1077,100 @@ final class Interpreter
             $this->execute($ops, $formResources instanceof PdfDict ? $formResources : $resources);
         } finally {
             array_pop($this->forms);
-            [$this->gs, $this->stack, $this->stackOverflow, $this->path, $this->pendingClip, $this->textClip, $this->textClipPending] = $saved;
+            [$this->gs, $this->stack, $this->stackOverflow, $this->path, $this->pendingClip, $this->textClip, $this->textClipPending, $this->raster, $this->tm, $this->tlm] = $saved;
         }
+        if ($offscreen !== null && ! $mask) {
+            $this->raster->composite($offscreen, $this->gs, $this->budget);
+        }
+
+        return $offscreen;
+    }
+
+    private function groupSpace(PdfDict $group, ?PdfDict $resources): ColourSpace
+    {
+        $space = $group->has('CS') ? ColourSpace::fromPdf($group->get('CS'), $resources, $this->doc, $this->budget)
+            : ($this->raster->surface?->space ?? ColourSpace::rgb());
+        if (! in_array($space->kind, ['gray', 'rgb', 'cmyk'], true)) {
+            $this->skip('transparency');
+
+            return ColourSpace::rgb();
+        }
+
+        return $space;
+    }
+
+    private function softMask(PdfDict $mask, ?PdfDict $resources): ?CoverageMask
+    {
+        $subtype = $mask->name('S');
+        $ref = $mask->get('G');
+        $form = $this->doc->resolve($ref);
+        $group = $form instanceof PdfStream ? $this->doc->resolve($form->dict->get('Group')) : null;
+        if (! in_array($subtype, ['Alpha', 'Luminosity'], true) || ! $form instanceof PdfStream
+            || ! $group instanceof PdfDict || $group->name('S') !== 'Transparency'
+            || ($subtype === 'Luminosity' && ! $group->has('CS'))) {
+            return null;
+        }
+        $transfer = $this->doc->resolve($mask->get('TR'));
+        $function = null;
+        if ($transfer !== null && ! ($transfer instanceof PdfName && $transfer->value === 'Identity')) {
+            $function = TintFunction::load($transfer, $this->doc, $this->budget, 1, 1);
+            if ($function === null) {
+                return null;
+            }
+        }
+        $formResources = $this->doc->resolve($form->dict->get('Resources'));
+        $space = $this->groupSpace($group, $formResources instanceof PdfDict ? $formResources : $resources);
+        if ($subtype === 'Luminosity' && $space->calibrated) {
+            return null; // CIE Y needs calibration/profile processing, not device-gray weights.
+        }
+        $back = $space->initial();
+        $bc = $this->doc->resolve($mask->get('BC'));
+        if ($subtype === 'Luminosity' && is_array($bc)) {
+            $values = array_map(fn ($v) => $this->doc->resolve($v), $bc);
+            $back = self::numbers($values, $space->components) ?? $back;
+            $back = array_map(static fn ($v) => max(0.0, min(1.0, $v)), $back);
+        }
+        $raster = $this->form($form, $ref, $resources, true, $subtype === 'Luminosity' ? $back : null);
+        if ($raster === null) {
+            return null;
+        }
+
+        $outside = $subtype === 'Alpha' ? 0.0 : $space->convertTo($back, ColourSpace::gray())[0];
+        $outside = $function !== null ? $function->evaluate([$outside])[0] : $outside;
+
+        return CoverageMask::generate($raster->width, $raster->height, $this->budget, static function ($x, $y) use ($raster, $subtype, $back, $function, $space) {
+            [$c, $a] = $raster->surface->source($x, $y);
+            $value = $a;
+            if ($subtype === 'Luminosity') {
+                foreach ($c as $i => &$v) {
+                    $v = $a * $v + (1 - $a) * $back[$i];
+                }
+                $value = $space->convertTo($c, ColourSpace::gray())[0];
+            }
+
+            return $function !== null ? $function->evaluate([$value])[0] : $value;
+        }, $raster->surface->bounds(), max(0.0, min(1.0, $outside)));
+    }
+
+    /** A conservative device rectangle, clipped BEFORE float-to-int conversion. */
+    private static function deviceBounds(array $box, array $m, int $width, int $height): array
+    {
+        if ($box[2] < $box[0] || $box[3] < $box[1]) {
+            return [0, 0, 0, 0];
+        }
+        $xs = $ys = [];
+        foreach ([[$box[0], $box[1]], [$box[0], $box[3]], [$box[2], $box[1]], [$box[2], $box[3]]] as [$x, $y]) {
+            $dx = $x * $m[0] + $y * $m[2] + $m[4];
+            $dy = $x * $m[1] + $y * $m[3] + $m[5];
+            if (! is_finite($dx) || ! is_finite($dy)) {
+                return [0, 0, $width, $height];
+            }
+            $xs[] = $dx;
+            $ys[] = $dy;
+        }
+
+        return [(int) max(0.0, min($width, floor(min($xs)))), (int) max(0.0, min($height, floor(min($ys)))),
+            (int) max(0.0, min($width, ceil(max($xs)))), (int) max(0.0, min($height, ceil(max($ys))))];
     }
 
     // ------------------------------------------------------------------
@@ -989,15 +1180,15 @@ final class Interpreter
         try {
             $image = SampledImage::load($stream, $this->doc, $this->budget, $resources);
             $fill = $image->stencil ? $this->paint(false) : [0, 0, 0];
-            if (! $image->stencil && ($this->gs->unsupportedMask || $this->gs->unsupportedBlend)) {
+            if (! $image->stencil && (($this->gs->unsupportedMask && ! $image->hasMask()) || $this->gs->unsupportedBlend)) {
                 $this->skip('transparency');
             }
             if ($fill !== null) {
-                ImagePainter::paint($image, $this->raster, $this->gs->ctm, $fill, $this->budget, $this->gs->clip, $this->gs->fillAlpha);
+                ImagePainter::paint($image, $this->raster, $this->gs->ctm, $fill, $this->budget, $this->gs->clip, $this->gs->fillAlpha, $this->gs);
             }
         } catch (ImageException) {
             $this->skip($kind);
-            ImagePainter::paint(SampledImage::placeholder(), $this->raster, $this->gs->ctm, [0, 0, 0], $this->budget, $this->gs->clip, $this->gs->fillAlpha);
+            ImagePainter::paint(SampledImage::placeholder(), $this->raster, $this->gs->ctm, [0, 0, 0], $this->budget, $this->gs->clip, $this->gs->fillAlpha, $this->gs);
         }
     }
 

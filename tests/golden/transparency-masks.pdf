@@ -1,0 +1,61 @@
+%PDF-1.7
+%‚„œ”
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R  >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [5 0 R] /Count 1 /MediaBox [0 0 200 200] >>
+endobj
+3 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>
+endobj
+4 0 obj
+<<  /Length 224 >>
+stream
+q 1 0 0 1 0 0 cm /M0 gs 1 0.2 0 rg 0 0 100 100 re f Q q 1 0 0 1 100 0 cm /M1 gs 1 0.2 0 rg 0 0 100 100 re f Q q 1 0 0 1 0 100 cm /M2 gs 1 0.2 0 rg 0 0 100 100 re f Q q 1 0 0 1 100 100 cm /M3 gs 1 0.2 0 rg 0 0 100 100 re f Q 
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /Font << /F1 3 0 R >> /ExtGState << /M0 << /ca 0.8 /SMask << /S /Alpha /G 6 0 R /BC [0.2 0.2 0.2]  >> >> /M1 << /ca 0.8 /SMask << /S /Luminosity /G 7 0 R /BC [0.2 0.2 0.2]  >> >> /M2 << /ca 0.8 /SMask << /S /Alpha /G 8 0 R /BC [0.2 0.2 0.2] /TR << /FunctionType 2 /Domain [0 1] /C0 [1] /C1 [0] /N 1 >> >> >> /M3 << /ca 0.8 /SMask << /S /Luminosity /G 9 0 R /BC [0.2 0.2 0.2] /TR << /FunctionType 2 /Domain [0 1] /C0 [1] /C1 [0] /N 1 >> >> >>  >> >>  >>
+endobj
+6 0 obj
+<< /Type /XObject /Subtype /Form /BBox [0 0 100 100] /Group << /S /Transparency /CS /DeviceRGB >> /Resources << /ExtGState << /Half << /ca 0.5 >> >> >> /Length 65 >>
+stream
+/Half gs 1 1 1 rg 0 0 70 100 re f 0.1 0.4 0.8 rg 30 30 65 65 re f
+endstream
+endobj
+7 0 obj
+<< /Type /XObject /Subtype /Form /BBox [0 0 100 100] /Group << /S /Transparency /CS /DeviceRGB >> /Resources << /ExtGState << /Half << /ca 0.5 >> >> >> /Length 65 >>
+stream
+/Half gs 1 1 1 rg 0 0 70 100 re f 0.1 0.4 0.8 rg 30 30 65 65 re f
+endstream
+endobj
+8 0 obj
+<< /Type /XObject /Subtype /Form /BBox [0 0 100 100] /Group << /S /Transparency /CS /DeviceRGB >> /Resources << /ExtGState << /Half << /ca 0.5 >> >> >> /Length 65 >>
+stream
+/Half gs 1 1 1 rg 0 0 70 100 re f 0.1 0.4 0.8 rg 30 30 65 65 re f
+endstream
+endobj
+9 0 obj
+<< /Type /XObject /Subtype /Form /BBox [0 0 100 100] /Group << /S /Transparency /CS /DeviceRGB >> /Resources << /ExtGState << /Half << /ca 0.5 >> >> >> /Length 65 >>
+stream
+/Half gs 1 1 1 rg 0 0 70 100 re f 0.1 0.4 0.8 rg 30 30 65 65 re f
+endstream
+endobj
+xref
+0 10
+0000000000 65535 f 
+0000000015 00000 n 
+0000000065 00000 n 
+0000000146 00000 n 
+0000000243 00000 n 
+0000000519 00000 n 
+0000001046 00000 n 
+0000001310 00000 n 
+0000001574 00000 n 
+0000001838 00000 n 
+trailer
+<< /Size 10 /Root 1 0 R >>
+startxref
+2102
+%%EOF

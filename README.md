@@ -16,8 +16,8 @@ no third-party PDF library. Just PHP 8.4 and its bundled `zlib`, `mbstring`,
 
 > **Status: 0.x, reader and writer, plus the first steps of a page renderer.**
 > The renderer draws vector paths, TrueType text and sampled image XObjects
-> (see [Rendering pages](#rendering-pages)); other font types, advanced image codecs and
-> advanced transparency are later steps. Laravel 13 page-image serving is
+> (see [Rendering pages](#rendering-pages)), transparency groups, soft masks and
+> blend modes; other font types and advanced image codecs are later steps. Laravel 13 page-image serving is
 > available through the optional adapter below. Pre-1.0, breaking changes may
 > land in a minor release; the [changelog](CHANGELOG.md) marks each one.
 
@@ -182,7 +182,7 @@ Agent::read($pdf, ['limits' => ['maxPages' => 200, 'timeSeconds' => 5]]);
 | `maxPages` | 50,000 | `too_many_pages` |
 | `timeSeconds` | 30 | `time_budget` |
 | `memoryBytes` | 256 MB growth | `memory_budget` |
-| `maxRenderPixels` | 25,000,000 per rendered page | `too_many_pixels` (judged before the raster is allocated) |
+| `maxRenderPixels` | 25,000,000 across the page and live group/mask buffers | `too_many_pixels` (judged before allocation) |
 | `maxImagePixels` | 16,000,000 per source image | `too_many_pixels` (judged before decoding) |
 | `renderTimeSeconds` | 30 per rendered page | `time_budget` |
 
@@ -363,7 +363,13 @@ Adobe markers and PDF ColorTransform/Decode settings are respected.
 **Clipping and transparency:** nonzero/even-odd path clips, Form BBox and
 text clipping modes; constant fill/stroke alpha; image soft masks, explicit
 stencil masks and colour-key masks. Text clips accumulate until `ET`; path
-clips begin after painting the current path. Separation/DeviceN colours use
+clips begin after painting the current path. Form transparency groups support
+isolation, knockout, native Gray/RGB/CMYK blending and invocation alpha, blend
+mode and soft mask applied once. ExtGState Alpha and device-space Luminosity
+masks honour BC, AIS and Identity/type 0/2/3 transfer functions; their coordinates
+are fixed when `gs` installs them. All sixteen PDF blend modes are supported,
+including Hue, Saturation, Color and Luminosity. Combined fill/stroke portions
+remain one transparency object. Separation/DeviceN colours use
 their alternate space for exponential or multilinear sampled tint functions
 (up to four inputs/outputs). Calculator functions remain unsupported.
 
@@ -374,8 +380,9 @@ ZapfDingbats: nothing is bundled for them), in CFF
 text (`text-vertical`), predefined CJK CMaps (`text-cmap`), fonts that cannot
 be read (`text-font-invalid`) and single damaged glyphs (`text-glyph`);
 Progressive/arithmetic/lossless JPEG, JPX/CCITT/JBIG2 or damaged images (drawn
-as checkerboard placeholders), shadings, patterns, blend modes and transparency
-groups/ExtGState soft masks (drawn approximately), unsupported tint functions
+as checkerboard placeholders), shadings, patterns, unknown blend modes/group
+spaces, unsupported mask transfers, calibrated luminosity masks and TK=false
+text (reported as `transparency`), unsupported tint functions
 (drawn as grey), annotation
 appearances, and optional-content visibility (everything is drawn). The
 `text-*` entries name the fonts concerned. Check `complete()` before treating a
@@ -385,7 +392,9 @@ Rendering is bounded like reading: the pixel count is judged before anything
 is allocated, every operator counts against `maxOperators`, forms nest at most
 `maxFormDepth` deep and never into themselves, and each render has its own
 time budget (see [Hostile input](#hostile-input)).
-Raster, clip and JPEG allocations also reserve row overhead and PHP's hard
+Group/mask buffers are cropped in device coordinates and share the live pixel
+cap; normal invariant groups need no extra buffer. Raster, clip, group/mask
+and JPEG allocations also reserve row overhead and PHP's hard
 memory-limit headroom before allocating. Unsupported nested or Matte image
 masks produce a reported placeholder.
 

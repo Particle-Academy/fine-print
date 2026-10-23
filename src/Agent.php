@@ -40,7 +40,7 @@ final class Agent
      * This package's own version, kept in ONE place and pinned to the changelog
      * by `VersionIsSingleSourcedTest`.
      */
-    public const VERSION = '0.1.0';
+    public const VERSION = '0.2.0';
 
     /**
      * Read a PDF for an agent.
@@ -293,7 +293,7 @@ final class Agent
      */
     public static function validate(array $doc): array
     {
-        return (new Validator())->validate($doc);
+        return (new Validator)->validate($doc);
     }
 
     /**
@@ -314,7 +314,7 @@ final class Agent
         if ($errors === []) {
             return ['ok' => true, 'schema' => $doc, 'errors' => []];
         }
-        ['doc' => $repaired, 'notes' => $notes] = (new Repairer())->repair($doc);
+        ['doc' => $repaired, 'notes' => $notes] = (new Repairer)->repair($doc);
         $remaining = self::validate($repaired);
 
         return ['ok' => $remaining === [], 'schema' => $repaired, 'errors' => array_merge($notes, $remaining)];
@@ -400,7 +400,7 @@ final class Agent
      */
     public static function lint(array $doc, array $options = []): array
     {
-        return (new Linter())->lint($doc, $options);
+        return (new Linter)->lint($doc, $options);
     }
 
     /**

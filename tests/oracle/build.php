@@ -32,6 +32,7 @@ require __DIR__.'/../../vendor/autoload.php';
 
 use FinePrint\Tests\Support\PdfBuilder;
 use FinePrint\Tests\Support\RenderFixtures;
+use FinePrint\Tests\Support\TransparencyFixtures;
 
 $golden = dirname(__DIR__).'/golden';
 $work = dirname(__DIR__).'/.out/oracle';
@@ -44,7 +45,7 @@ const ORACLE_RENDER_SCALE = 2;
 
 // ONLY=name,name renders just those fixtures (the others' goldens are left alone).
 $only = getenv('ONLY') ? explode(',', (string) getenv('ONLY')) : null;
-$all = RenderFixtures::SCALES + RenderFixtures::TEXT_SCALES + RenderFixtures::LOCAL_SCALES;
+$all = RenderFixtures::SCALES + RenderFixtures::TEXT_SCALES + RenderFixtures::LOCAL_SCALES + TransparencyFixtures::scales();
 
 $jobs = [];
 foreach ($all as $name => $scales) {

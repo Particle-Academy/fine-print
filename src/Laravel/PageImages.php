@@ -24,11 +24,17 @@ use InvalidArgumentException;
 final class PageImages
 {
     private readonly Limits $limits;
+
     private readonly float $maxScale;
+
     private readonly int $maxDimension;
+
     private readonly int $ttl;
+
     private readonly string $namespace;
+
     private readonly bool $watermark;
+
     private readonly bool $requireComplete;
 
     private function __construct(private readonly Closure $resolve, private readonly Repository $cache, array $options)
@@ -98,7 +104,7 @@ final class PageImages
             if (strlen($source->bytes) > $this->limits->maxFileBytes) {
                 throw new RefusedException('too_large', 'The PDF exceeds the serving file limit.');
             }
-            $key = $this->namespace.':'.hash('sha256', json_encode([hash('sha256', $source->key), hash('sha256', $source->version),
+            $key = $this->namespace.':'.hash('sha256', json_encode([Renderer::CACHE_VERSION, hash('sha256', $source->key), hash('sha256', $source->version),
                 hash('sha256', $source->bytes), $page, $scale, get_object_vars($this->limits)], JSON_THROW_ON_ERROR));
             $budget->check();
             $packet = $this->cache->get($key);

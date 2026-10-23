@@ -8,6 +8,46 @@ BREAKING and says what a consumer must do.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-23
+
+Mac Quartz PDFs that use ordinary transparency groups and device-space soft
+masks now render complete pages, so the default strict Laravel page-image
+route can serve them. Upgrade normally; `requireComplete` stays enabled.
+Cached page images are refreshed automatically, including custom namespaces.
+
+### Added
+
+- Form transparency groups with isolated/non-isolated backdrops, knockout,
+  native Gray/RGB/CMYK blending and invocation alpha/blend/mask applied once.
+  Equivalent normal groups draw directly without an unnecessary buffer.
+- ExtGState Alpha and device-space Luminosity masks with BC backdrops,
+  Identity, sampled, exponential and bounded stitching transfer functions.
+  Mask coordinates are fixed when `gs` installs them. AIS shape semantics,
+  explicit/soft image mask precedence and atomic path/glyph fill+stroke.
+- All sixteen PDF blend modes, including Hue, Saturation, Color and Luminosity.
+  Page groups blend before the white display background is applied.
+- Cropped offscreen and soft-mask buffers count against the shared live
+  `maxRenderPixels` cap and are checked against the memory budget and PHP's
+  hard memory limit before allocation. Recursive masks share the form-depth
+  guard. Calculator transfers, calibrated luminosity masks, unknown group
+  spaces/modes and TK=false text remain reported approximations.
+
+### Validation
+
+- Own synthetic Quartz fixtures, Chromium goldens for every blend mode and
+  alpha/luminosity masks, child-process memory checks and cache-upgrade coverage.
+  Bounds remain MAE <=2 and <=1% pixels off by >64. Chromium's measured
+  isolation/knockout limitation is explicit; those cases use independently
+  expanded ISO equations and tests proven red when I or K is ignored.
+- A local, uncommitted six-page Quartz document renders complete at 1x and 2x.
+  No third-party runtime dependency or fixture is added.
+
+### Changed
+
+- **BREAKING for custom pixel caps:** `maxRenderPixels` now counts all live
+  rendering buffers, rather than only the page. If your cap was exactly one
+  page's area, allow room for group/mask buffers or request a lower scale.
+
 ## [0.1.0] - 2026-10-23
 
 First release. Install with `composer require particle-academy/fine-print`;

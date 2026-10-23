@@ -24,11 +24,12 @@ use InvalidArgumentException;
  *
  * Drawn: vector paths (fills, strokes, dashes, colour, transforms, form
  * XObjects), TrueType text, sampled/baseline JPEG images, clipping, constant
- * alpha, image masks and sampled/exponential alternate-colour tint functions.
+ * alpha, image masks, transparency groups, soft masks, blend modes and bounded
+ * sampled/exponential/stitching alternate-colour tint functions.
  * NOT drawn yet, and
  * listed in {@see Rendering::$skipped}: text in fonts that are not embedded
  * or are CFF / Type 1 / Type 3, unsupported image codecs, shading, patterns,
- * transparency groups, blend modes and ExtGState soft masks.
+ * unsupported transparency spaces/functions and TK=false text.
  *
  * Bounded by {@see Limits}: the raster's pixel count is judged before it is
  * allocated (`maxRenderPixels`), every operator counts (`maxOperators`), forms
@@ -38,10 +39,13 @@ use InvalidArgumentException;
  */
 final class Renderer
 {
+    /** @internal Increment when cached pixels or completeness semantics change. */
+    public const CACHE_VERSION = 2;
+
     /**
      * @param  string|Document  $pdf  PDF bytes, or a document already open
      * @param  Limits|array<string, int|float>|null  $limits  for bytes: every limit; for a Document: the render limits
-     *                                                       (null keeps the document's own)
+     *                                                        (null keeps the document's own)
      *
      * @throws RefusedException
      * @throws InvalidArgumentException for a scale that is not a positive finite number
@@ -125,12 +129,14 @@ final class Renderer
         };
 
         $budget = new Budget($limits->with(['timeSeconds' => $limits->renderTimeSeconds]), 'Rendering');
+        $budget->reservePixels($w * $h);
         $content = $doc->pageContents($number);
-        $raster = new Raster($w, $h, $budget);
+        $raster = new Raster($w, $h, $budget, transparentPage: true);
         $budget->check();
 
         $interp = new Interpreter($doc, $raster, $budget, $base);
-        $interp->run($content, $p['resources']);
+        $group = $doc->resolve($p['dict']->get('Group'));
+        $interp->run($content, $p['resources'], $group instanceof PdfDict ? $group : null);
         self::annotations($doc, $p['dict'], $interp);
 
         $skipped = $interp->skipped();

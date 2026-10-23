@@ -2,8 +2,14 @@
 
 declare(strict_types=1);
 
+use FinePrint\Budget;
 use FinePrint\Laravel\PageImages;
 use FinePrint\Laravel\PageSource;
+use FinePrint\Limits;
+use FinePrint\Render\Raster;
+use FinePrint\Render\RasterCache;
+use FinePrint\Render\Rendering;
+use FinePrint\Tests\Support\PdfBuilder;
 use FinePrint\Tests\Support\PngReader;
 use Illuminate\Cache\ArrayStore;
 use Illuminate\Cache\Repository;
@@ -36,12 +42,12 @@ class FpCountingImageStore extends ArrayStore
 
 function fplApp(Closure $resolver, array $options = []): array
 {
-    $container = new Container();
+    $container = new Container;
     Container::setInstance($container);
     $container->instance(Container::class, $container);
     $router = new Router(new Dispatcher($container), $container);
     $router->aliasMiddleware('auth', FpImageAuthMiddleware::class);
-    $store = new FpCountingImageStore();
+    $store = new FpCountingImageStore;
     $cache = new Repository($store);
     PageImages::register($router, '/docs/{file}/{page}.png', $resolver, $cache, $options);
 
@@ -70,9 +76,28 @@ function fplSource(string $pdf, string $version = '1', ?array $lines = null, str
 
 it('runs app authentication before resolving or looking up cached pages', function () {
     $calls = 0;
-    $app = fplApp(function () use (&$calls) { $calls++; return fplSource(fprPage('')); });
+    $app = fplApp(function () use (&$calls) {
+        $calls++;
+
+        return fplSource(fprPage(''));
+    });
     expect(fplGet($app, viewer: null)->getStatusCode())->toBe(401)
         ->and($calls)->toBe(0)->and($app[2]->writes)->toBe(0);
+});
+
+it('does not reuse the old renderer omission packet even in a custom cache namespace', function () {
+    $pdf = fprPage('/G Do', resources: '/XObject << /G 6 0 R >>', extra: fn (PdfBuilder $b) => $b->stream('1 0 0 rg 0 0 100 100 re f', '/Subtype /Form /BBox [0 0 100 100] /Group << /S /Transparency >>'));
+    $source = fplSource($pdf);
+    $app = fplApp(fn () => $source, ['namespace' => 'host-pages']);
+    // Published v0.1.0 cache identity and its stale transparency omission.
+    $limits = new Limits(maxFileBytes: 32 * 1024 * 1024, maxRenderPixels: 8_000_000, timeSeconds: 3.0, renderTimeSeconds: 3.0);
+    $oldKey = 'host-pages:'.hash('sha256', json_encode([hash('sha256', $source->key), hash('sha256', $source->version),
+        hash('sha256', $pdf), 1, 1.0, get_object_vars($limits)], JSON_THROW_ON_ERROR));
+    $stale = new Rendering(new Raster(100, 100), 1, 1.0, 0, [['kind' => 'transparency', 'count' => 1]], [], 1, 100, 100);
+    $app[3]->put($oldKey, RasterCache::encode($stale, new Budget($limits)), 300);
+    $response = fplGet($app);
+    expect($response->getStatusCode())->toBe(200)->and($response->headers->get('X-FinePrint-Complete'))->toBe('1')
+        ->and($app[2]->writes)->toBe(2);
 });
 
 it('returns only a private non-cacheable PNG with a server watermark', function () {
@@ -89,6 +114,7 @@ it('shares a clean raster cache while rendering each viewer identity separately'
     $calls = 0;
     $app = fplApp(function (Request $request) use (&$calls) {
         $calls++;
+
         return fplSource(fprPage('', '[0 0 400 300]'), lines: [$request->user()->email]);
     });
     $a = fplGet($app, viewer: 'Alex');
@@ -100,7 +126,9 @@ it('shares a clean raster cache while rendering each viewer identity separately'
 
 it('reauthorizes a file even on a warm cache', function () {
     $allowed = true;
-    $app = fplApp(function () use (&$allowed) { return $allowed ? fplSource(fprPage('')) : null; }, ['watermark' => false]);
+    $app = fplApp(function () use (&$allowed) {
+        return $allowed ? fplSource(fprPage('')) : null;
+    }, ['watermark' => false]);
     expect(fplGet($app)->getStatusCode())->toBe(200);
     $allowed = false;
     expect(fplGet($app)->getStatusCode())->toBe(404)->and($app[2]->writes)->toBe(1);
@@ -110,7 +138,9 @@ it('keys the cache by file identity, server version and content', function () {
     $version = '1';
     $pdf = fprPage('');
     $key = 'tenant:one';
-    $app = fplApp(function () use (&$version, &$pdf, &$key) { return fplSource($pdf, $version, key: $key); }, ['watermark' => false]);
+    $app = fplApp(function () use (&$version, &$pdf, &$key) {
+        return fplSource($pdf, $version, key: $key);
+    }, ['watermark' => false]);
     expect(fplGet($app)->getStatusCode())->toBe(200);
     expect(fplGet($app, '/docs/one/1.png?version=client-override')->getStatusCode())->toBe(200);
     expect($app[2]->writes)->toBe(1);

@@ -203,14 +203,15 @@ final class SampledImage
 
                 return $decoded['data'];
             }
+
             return Filters::decodeChain($names, $s->raw, $plist, $budget);
         } catch (OpaqueStreamException) {
             throw new ImageException('Unsupported image codec.');
         }
     }
 
-    /** @param array{int, int, int} $fill @return ?array{int, int, int} */
-    public function pixel(int $x, int $y, array $fill): ?array
+    /** RGB bytes, or native normalised components when a target is supplied. */
+    public function pixel(int $x, int $y, array $fill, ?ColourSpace $target = null): ?array
     {
         $rowBits = intdiv($this->width * $this->components * $this->bits + 7, 8) * 8;
         $offset = $y * $rowBits + $x * $this->components * $this->bits;
@@ -244,7 +245,7 @@ final class SampledImage
             }
         }
 
-        return $this->space->toRgb($values);
+        return $target !== null ? $this->space->convertTo($values, $target) : $this->space->toRgb($values);
     }
 
     /** Visible checkerboard for content we deliberately could not decode. */
@@ -264,5 +265,15 @@ final class SampledImage
         $pixel = $this->alpha->pixel($x, $y, [0, 0, 0]);
 
         return $this->alpha->stencil ? ($pixel !== null ? 1.0 : 0.0) : ($pixel[0] ?? 0) / 255;
+    }
+
+    public function hasMask(): bool
+    {
+        return $this->alpha !== null || $this->colourKey !== null;
+    }
+
+    public function maskIsShape(): bool
+    {
+        return $this->alpha?->stencil ?? false;
     }
 }
