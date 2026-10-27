@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace FinePrint\Writer;
 
 use FinePrint\Agent;
+use FinePrint\Writer\Pdf\Syntax;
 
 /**
  * What will be wrong with the written PDF. It writes the document, then
@@ -113,6 +114,15 @@ final class Linter
             if ($m[$side] < $needs) {
                 $findings[] = ['rule' => 'band-overlap', 'severity' => 'warning', 'path' => "page.{$kind}",
                     'message' => sprintf('the %s sits 36pt from the page edge and needs a %s margin of at least %dpt, or it runs into the text', $kind, $side, (int) ceil($needs))];
+            }
+        }
+        $frame = Schema::pageFrame($doc);
+        if ($frame !== null) {
+            $reach = $frame['inset'] + $frame['width'];
+            $tight = array_keys(array_filter($m, fn (float $v) => $v < $reach));
+            if ($tight !== []) {
+                $findings[] = ['rule' => 'frame-overlap', 'severity' => 'warning', 'path' => 'page.border',
+                    'message' => sprintf('the page border reaches %spt from the edge, inside the %s margin, so text can run over it; make every margin at least %spt', Syntax::num($reach), implode('/', $tight), Syntax::num($reach))];
             }
         }
     }

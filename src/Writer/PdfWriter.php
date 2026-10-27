@@ -57,7 +57,23 @@ final class PdfWriter
         $composer = new Composer($fonts, $images, $diagnostics, $doc, $bodyHeight);
         $flow = $composer->compose(is_array($doc['blocks'] ?? null) ? $doc['blocks'] : [], $frameWidth);
 
-        $paginator = new Paginator($m['left'], $m['top'], $ph - $m['bottom'], fn () => new Canvas($pw, $ph, $fonts), $diagnostics);
+        // Page decoration goes first on every page, so all content paints over
+        // it, and it is sized by the page, never by what the page holds.
+        $background = is_array($doc['page'] ?? null) && is_string($doc['page']['background'] ?? null)
+            && preg_match('/^#[0-9A-Fa-f]{6}$/', $doc['page']['background']) === 1 ? Syntax::rgb($doc['page']['background']) : null;
+        $frame = Schema::pageFrame($doc);
+        $newCanvas = function () use ($pw, $ph, $fonts, $background, $frame): Canvas {
+            $canvas = new Canvas($pw, $ph, $fonts);
+            if ($background !== null) {
+                $canvas->rect(0, 0, $pw, $ph, $background);
+            }
+            if ($frame !== null) {
+                $canvas->frame($frame['inset'], $frame['width'], Syntax::rgb($frame['color']), $frame['style']);
+            }
+
+            return $canvas;
+        };
+        $paginator = new Paginator($m['left'], $m['top'], $ph - $m['bottom'], $newCanvas, $diagnostics);
         $pages = $paginator->paginate($flow);
 
         $fill = [];

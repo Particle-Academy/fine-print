@@ -73,14 +73,45 @@ final class Canvas
 
             return;
         }
-        $dash = match ($style) {
+        $this->ops .= 'q '.Syntax::num($width).' w '.Syntax::stroke($rgb).' '.self::dash($style, $width)."\n"
+            .Syntax::num($x1).' '.Syntax::num($this->height - $top1).' m '
+            .Syntax::num($x2).' '.Syntax::num($this->height - $top2)." l S Q\n";
+    }
+
+    /**
+     * A frame around the whole page, `$inset` points from every edge to its
+     * outside, `$width` points thick. Drawn as closed rectangles rather than
+     * four lines, so the corners meet; a double frame is two rectangles, each
+     * a third of the width, with a third between them.
+     *
+     * @param  array{0: float, 1: float, 2: float}  $rgb
+     */
+    public function frame(float $inset, float $width, array $rgb, string $style = 'single'): void
+    {
+        if ($style === 'none' || $width <= 0) {
+            return;
+        }
+        $rules = $style === 'double'
+            ? [[$inset + $width / 6, $width / 3], [$inset + $width - $width / 6, $width / 3]]
+            : [[$inset + $width / 2, $width]];
+        foreach ($rules as [$c, $t]) {
+            $w = $this->width - 2 * $c;
+            $h = $this->height - 2 * $c;
+            if ($w <= 0 || $h <= 0) {
+                continue;
+            }
+            $this->ops .= 'q '.Syntax::num($t).' w '.Syntax::stroke($rgb).' '.self::dash($style === 'double' ? 'single' : $style, $t)." 0 j\n"
+                .Syntax::num($c).' '.Syntax::num($c).' '.Syntax::num($w).' '.Syntax::num($h)." re S Q\n";
+        }
+    }
+
+    private static function dash(string $style, float $width): string
+    {
+        return match ($style) {
             'dashed' => '['.Syntax::num(max(2.0, 3 * $width)).' '.Syntax::num(max(1.5, 2 * $width)).'] 0 d 0 J',
             'dotted' => '[0 '.Syntax::num(max(1.0, 2 * $width)).'] 0 d 1 J',
             default => '[] 0 d 0 J',
         };
-        $this->ops .= 'q '.Syntax::num($width).' w '.Syntax::stroke($rgb).' '.$dash."\n"
-            .Syntax::num($x1).' '.Syntax::num($this->height - $top1).' m '
-            .Syntax::num($x2).' '.Syntax::num($this->height - $top2)." l S Q\n";
     }
 
     public function image(string $name, float $x, float $top, float $w, float $h): void

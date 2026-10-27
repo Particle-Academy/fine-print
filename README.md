@@ -281,6 +281,11 @@ Agent::guide();                   // the agent guide (agent-guide/building-pdfs.
   size, letter spacing, font, and links.
 - **Layout:** line wrapping and justification with real font metrics; headings
   kept with what follows; no single line left at the foot or head of a page.
+- **Page decoration:** `page.background` paints a colour full-bleed, and
+  `page.border` draws a frame inset from the page edge (single, double,
+  dashed or dotted), on every page under all content and independent of how
+  much the page holds: `'page' => ['background' => '#FDFAF3', 'border' =>
+  ['style' => 'double', 'width' => 6, 'color' => '#B08D57', 'inset' => 18]]`.
 - **Fonts:** the standard 14 text faces (Helvetica, Times, Courier) with their
   metrics, in Windows-1252. For anything else, the host registers TrueType
   fonts, embedded as subsets with a ToUnicode map so the text extracts exactly:

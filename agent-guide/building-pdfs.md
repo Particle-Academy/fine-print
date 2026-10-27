@@ -37,6 +37,14 @@ Then:
   drawn (lint says so).
 - Page: `size` letter / legal / a4, `orientation`, `margins` (one inch by
   default), and `header` / `footer` bands with `{page}` and `{pages}`.
+- Page decoration, on every page and under all content: `background`
+  ("#FDFAF3", full-bleed) and `border`, a frame measured from the page edge
+  whatever the page holds: `{"style": "double", "width": 6, "color":
+  "#B08D57", "inset": 18}` (single, 0.5pt, black, 24pt by default; a double
+  is two rules a third of the width each). It does not move the text: keep
+  every margin wider than `inset + width` (lint: `frame-overlap`). For a
+  certificate, use this rather than a one-cell table with borders, which ends
+  wherever its content does.
 - The `title` is stored as the PDF's title metadata. It is not drawn: put a
   heading at the top if the page should show it.
 

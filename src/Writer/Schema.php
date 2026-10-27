@@ -33,6 +33,9 @@ final class Schema
         'a4' => [595.28, 841.89],
     ];
 
+    /** Points from the page edge to the outside of a page frame, by default. */
+    public const PAGE_FRAME_INSET = 24.0;
+
     /** Boolean run flags (all optional). */
     public const RUN_FLAGS = ['bold', 'italic', 'underline', 'strike', 'code', 'smallCaps'];
 
@@ -266,6 +269,18 @@ final class Schema
                         'margins' => ['$ref' => '#/$defs/boxSides'],
                         'header' => ['$ref' => '#/$defs/band', 'description' => 'A running header on every page.'],
                         'footer' => ['$ref' => '#/$defs/band', 'description' => 'A running footer on every page: where a multi-page document carries its page numbers.'],
+                        'background' => $hex + ['description' => 'Page colour, painted full-bleed on every page under everything else, e.g. "#FDFAF3". White (none) by default.'],
+                        'border' => [
+                            'type' => 'object',
+                            'additionalProperties' => false,
+                            'description' => 'A frame around every page, measured from the page edge, so it is the same whatever the page holds (a certificate border). e.g. {"style": "double", "width": 6, "color": "#B08D57", "inset": 18}. Margins are separate: keep them wider than inset + width so text clears the frame.',
+                            'properties' => [
+                                'style' => ['enum' => self::BORDER_STYLES, 'description' => 'single by default; double draws two rules with a gap, each a third of the width; none draws nothing.'],
+                                'width' => ['type' => 'number', 'exclusiveMinimum' => 0, 'description' => 'Points, the whole frame (both rules and the gap, for double). 0.5 by default.'],
+                                'color' => $hex + ['description' => 'Black by default.'],
+                                'inset' => ['type' => 'number', 'minimum' => 0, 'description' => 'Points from the page edge to the outside of the frame. '.self::PAGE_FRAME_INSET.' by default.'],
+                            ],
+                        ],
                     ],
                 ],
                 'defaultFont' => ['type' => 'string', 'description' => 'Font every run inherits unless it names its own. Helvetica by default.'],
@@ -305,6 +320,36 @@ final class Schema
         }
 
         return [$w, $h];
+    }
+
+    /**
+     * The page frame with its defaults filled in, or null when there is none
+     * (absent, or style "none"). Values that would not validate fall back to
+     * their defaults; the validator is what refuses them.
+     *
+     * @param  array<string, mixed>  $doc
+     * @return array{style: string, width: float, color: string, inset: float}|null
+     */
+    public static function pageFrame(array $doc): ?array
+    {
+        $b = is_array($doc['page'] ?? null) ? ($doc['page']['border'] ?? null) : null;
+        if (! is_array($b)) {
+            return null;
+        }
+        $style = in_array($b['style'] ?? null, self::BORDER_STYLES, true) ? $b['style'] : 'single';
+        if ($style === 'none') {
+            return null;
+        }
+        $width = $b['width'] ?? null;
+        $inset = $b['inset'] ?? null;
+        $color = $b['color'] ?? null;
+
+        return [
+            'style' => $style,
+            'width' => (is_int($width) || is_float($width)) && $width > 0 && is_finite((float) $width) ? (float) $width : 0.5,
+            'color' => is_string($color) && preg_match('/^#[0-9A-Fa-f]{6}$/', $color) === 1 ? $color : '#000000',
+            'inset' => (is_int($inset) || is_float($inset)) && $inset >= 0 && is_finite((float) $inset) ? (float) $inset : self::PAGE_FRAME_INSET,
+        ];
     }
 
     /**

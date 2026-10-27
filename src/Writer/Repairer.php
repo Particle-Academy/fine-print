@@ -33,7 +33,7 @@ final class Repairer
         'header', 'language', 'widthPx', 'heightPx', 'alt', 'bold', 'italic', 'underline', 'strike', 'code',
         'smallCaps', 'link', 'color', 'highlight', 'size', 'font', 'letterSpacing', 'title', 'defaultFont',
         'defaultSize', 'page', 'margins', 'orientation', 'footer', 'left', 'right', 'center', 'top', 'bottom',
-        'insideH', 'insideV', 'style',
+        'insideH', 'insideV', 'style', 'background', 'border', 'inset',
     ];
 
     /** @var list<array{path: string, message: string}> */

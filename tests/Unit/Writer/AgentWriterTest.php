@@ -10,7 +10,7 @@ use FinePrint\Agent;
  */
 
 /** Agent guide hash, over LF-normalised content. Edit the guide, then this. */
-const FPW_GUIDE_SHA256 = 'b10597e05bf53f649e2ef0280109a6ad5b248039dd454d967c13c614cfeb440f';
+const FPW_GUIDE_SHA256 = 'd747601efcbfdf3cf5d671697b0ca03386a55e90b6c97ec9bca2b90ded48d643';
 
 function fpwRules(array $findings): array
 {

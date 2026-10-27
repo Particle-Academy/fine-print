@@ -72,7 +72,7 @@ final class Validator
         }
         $page = $doc['page'];
         if (! is_array($page)) {
-            $this->error('page', 'page must be an object ({size?, orientation?, margins?, header?, footer?})');
+            $this->error('page', 'page must be an object ({size?, orientation?, margins?, header?, footer?, background?, border?})');
 
             return;
         }
@@ -104,6 +104,27 @@ final class Validator
             }
             $this->size($band['size'] ?? null, "page.{$kind}.size");
             $this->hex($band['color'] ?? null, "page.{$kind}.color", "page {$kind} color");
+        }
+        $this->hex($page['background'] ?? null, 'page.background', 'page background');
+        if (isset($page['border'])) {
+            $border = $page['border'];
+            if (! is_array($border)) {
+                $this->error('page.border', 'page border must be an object ({style?, width?, color?, inset?})');
+
+                return;
+            }
+            $before = count($this->errors);
+            $this->enum($border['style'] ?? null, 'page.border.style', 'page border style', Schema::BORDER_STYLES);
+            $this->number($border['width'] ?? null, 'page.border.width', 'page border width', positive: true);
+            $this->hex($border['color'] ?? null, 'page.border.color', 'page border color');
+            $this->number($border['inset'] ?? null, 'page.border.inset', 'page border inset', nonNegative: true);
+            $frame = Schema::pageFrame($doc);
+            if (count($this->errors) === $before && $frame !== null) {
+                [$w, $h] = Schema::pageSize($doc);
+                if (2 * ($frame['inset'] + $frame['width']) >= min($w, $h)) {
+                    $this->error('page.border', 'page border inset + width must leave room inside the frame on both axes');
+                }
+            }
         }
     }
 

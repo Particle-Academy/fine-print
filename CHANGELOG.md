@@ -8,6 +8,27 @@ BREAKING and says what a consumer must do.
 
 ## [Unreleased]
 
+### Added
+
+- Page decoration. `page.background` (`#RRGGBB`) paints the colour
+  full-bleed on every page, before any content. `page.border` draws a frame
+  measured from the page edge rather than from the content, so it is the
+  same on a page holding one line as on a full one: `style` (single, double,
+  dashed, dotted, none; single by default), `width` (the whole frame, 0.5 by
+  default; a double is two rules of a third each), `color` (black) and
+  `inset` (points from the edge to the outside of the frame, 24 by default).
+  Frames are closed rectangles, so corners meet. Validation refuses a frame
+  that leaves no room inside it; repair removes an invalid background or
+  frame and says so; the JSON schema and agent guide describe both. The
+  frame does not move the text: new lint `frame-overlap` warns when a margin
+  is narrower than `inset + width`. White text on a dark page background is
+  not flagged as hidden. Nothing changes for documents without them; their
+  bytes are identical.
+- PARITY: `last-word` (and its JS and Python ports), whose document model
+  this shares, has neither key yet. Its validator ignores them, so the same
+  document writes a .docx without the decoration, and its JSON schema
+  (`additionalProperties: false` on `page`) rejects them.
+
 ### Fixed
 
 - Letter spacing no longer leaks from one text run into every later line.
