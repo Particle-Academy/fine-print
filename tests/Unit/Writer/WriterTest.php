@@ -220,3 +220,63 @@ it('writes an empty document as one blank page', function () {
         ->and($read['pageCount'])->toBe(1)
         ->and($read['pages'][0]['text'])->toBe('');
 });
+
+/**
+ * The text-state value in effect at each TJ, across the whole uncompressed
+ * page stream. Tc/Tw/Tz/TL/Ts/Tr are graphics state: they persist across
+ * BT/ET and are restored only by Q.
+ *
+ * @return list<float>
+ */
+function fpwTextStateAtShows(string $pdf, string $op): array
+{
+    preg_match_all('/(-?[0-9.]+) '.$op.'\b|\bTJ\b|(?<![A-Za-z])q\b|(?<![A-Za-z])Q\b/', $pdf, $m, PREG_SET_ORDER);
+    $value = 0.0;
+    $stack = [];
+    $seen = [];
+    foreach ($m as $hit) {
+        if ($hit[0] === 'q') {
+            $stack[] = $value;
+        } elseif ($hit[0] === 'Q') {
+            $value = array_pop($stack) ?? $value;
+        } elseif ($hit[0] === 'TJ') {
+            $seen[] = $value;
+        } else {
+            $value = (float) $hit[1];
+        }
+    }
+
+    return $seen;
+}
+
+it('does not leak letter spacing from a tracked run into later text', function () {
+    $pdf = fpwWrite(['blocks' => [
+        ['type' => 'paragraph', 'runs' => [['text' => 'EYEBROW', 'letterSpacing' => 3]]],
+        fpwPara('Plain body text'),
+    ]], ['compress' => false]);
+
+    expect(fpwTextStateAtShows($pdf, 'Tc'))->toBe([3.0, 0.0]);
+
+    // Measured, too: the body is exactly as wide as it is with no eyebrow.
+    $alone = fpwRuns(fpwWrite(['blocks' => [fpwPara('Plain body text')]]));
+    $after = fpwRuns($pdf);
+    expect(end($after)['x1'])->toBe(end($alone)['x1']);
+});
+
+it('resets letter spacing when a later run asks for zero explicitly', function () {
+    $pdf = fpwWrite(['blocks' => [
+        ['type' => 'paragraph', 'runs' => [['text' => 'TRACKED', 'letterSpacing' => 2.5]]],
+        ['type' => 'paragraph', 'runs' => [['text' => 'Untracked', 'letterSpacing' => 0]]],
+        ['type' => 'paragraph', 'runs' => [['text' => 'TRACKED AGAIN', 'letterSpacing' => 2.5]]],
+    ]], ['compress' => false]);
+
+    expect(fpwTextStateAtShows($pdf, 'Tc'))->toBe([2.5, 0.0, 2.5]);
+});
+
+it('keeps letter spacing in effect across lines of one tracked paragraph', function () {
+    $pdf = fpwWrite(['blocks' => [
+        ['type' => 'paragraph', 'runs' => [['text' => "LINE ONE\nLINE TWO", 'letterSpacing' => 1.5]]],
+    ]], ['compress' => false]);
+
+    expect(fpwTextStateAtShows($pdf, 'Tc'))->toBe([1.5, 1.5]);
+});

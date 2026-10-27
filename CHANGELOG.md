@@ -8,6 +8,19 @@ BREAKING and says what a consumer must do.
 
 ## [Unreleased]
 
+### Fixed
+
+- Letter spacing no longer leaks from one text run into every later line.
+  The writer reset its record of character spacing (`Tc`) at each text
+  object, but `Tc` is graphics state and persists across `BT`/`ET`, so after
+  one run with `letterSpacing` the rest of the page was drawn tracked while
+  layout measured it untracked, and lines overflowed their frame. An explicit
+  `letterSpacing: 0` did not help, because it matched the stale record and no
+  `Tc` was written. Spacing is now tracked per page. Upgrade normally; nothing
+  changes for documents that never set `letterSpacing`. The writer emits no
+  other persistent text-state operator (`Tw`, `Tz`, `TL`, `Ts`, `Tr`), so
+  none had the same defect.
+
 ## [0.2.1] - 2026-10-23
 
 ### Fixed

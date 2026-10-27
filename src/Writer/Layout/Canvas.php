@@ -28,6 +28,15 @@ final class Canvas
     /** @var array<string, true> */
     private array $images = [];
 
+    /**
+     * Character spacing (Tc) in effect in the stream. It is graphics state,
+     * so it outlives BT/ET and is only restored by Q; it must be tracked per
+     * page, never per text object, or one tracked run leaks into every later
+     * line (whose width layout measured without it). No Tc is ever emitted
+     * inside a q/Q pair, so the page-level value is always the live one.
+     */
+    private float $tc = 0.0;
+
     /** Lowest point anything was drawn in the body, top-down. */
     public float $bodyBottom = 0.0;
 
@@ -122,7 +131,6 @@ final class Canvas
         $ops = "BT\n1 0 0 1 ".Syntax::num($x + $dx).' '.Syntax::num($base)." Tm\n";
         $key = null;
         $tj = '';
-        $tc = 0.0;
         foreach ($placed as $p) {
             $st = $p['style'];
             if ($st->textKey() !== $key) {
@@ -131,9 +139,9 @@ final class Canvas
                     $tj = '';
                 }
                 $ops .= '/'.$this->fonts->resourceName($st->font).' '.Syntax::num($st->size).' Tf '.Syntax::fill($st->color);
-                if ($st->letterSpacing !== $tc) {
+                if ($st->letterSpacing !== $this->tc) {
                     $ops .= ' '.Syntax::num($st->letterSpacing).' Tc';
-                    $tc = $st->letterSpacing;
+                    $this->tc = $st->letterSpacing;
                 }
                 $ops .= "\n";
                 $key = $st->textKey();
