@@ -161,3 +161,13 @@ it('exports a JSON schema for tool registration, without a chart block', functio
         ->and($schema['$defs']['run']['properties']['link']['description'])->toContain('mailto')
         ->and(json_encode($schema))->toBeString();
 });
+
+it('refuses a link with a trailing line feed: the pattern is anchored at the true end', function () {
+    // PCRE's `$` also matches before a final "\n". Without the D modifier,
+    // "https://example.com" plus a newline passed linkAllowed() and reached
+    // the PDF's /URI. The spec's pattern is printable ASCII only, end to end.
+    $doc = ['blocks' => [['type' => 'paragraph', 'runs' => [['text' => 'x', 'link' => "https://example.com\n"]]]]];
+
+    expect(FinePrint\Writer\Schema::linkAllowed("https://example.com\n"))->toBeFalse()
+        ->and(Agent::validate($doc)[0]['path'] ?? null)->toBe('blocks[0].runs[0].link');
+});

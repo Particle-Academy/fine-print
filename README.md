@@ -308,6 +308,47 @@ tag characters are removed, so the writer cannot be used to smuggle hidden
 text. Everything it writes reads back through `Agent::read()` with no guard
 findings.
 
+## Exchange: portable content and exports
+
+The four document packages (holy-sheet, last-word, dark-slide, fine-print)
+move content between each other as portable content, `fancyContent: 1`, a
+plain-JSON format specified in fancy-conformance (`suites/exchange/SPEC.md`)
+and tested here against its suites. No package depends on another to do it.
+
+```php
+// A spreadsheet range, extracted by holy-sheet, placed in a PDF.
+$doc = ['blocks' => [
+    ['type' => 'heading', 'level' => 1, 'runs' => [['text' => 'Q4 review']]],
+    ['type' => 'portable', 'content' => $range],   // validated, then expanded
+]];
+$fixed = FinePrint\Agent::validateAndRepair($doc);   // schema, errors, report
+$pdf = FinePrint\Agent::toBytes($fixed['schema']);
+
+// A PDF's text, for a document or a deck to place.
+$x = FinePrint\Agent::extract($pdf, ['pages' => [1, 3]]);   // ok, content, report
+
+// Exports are OFF until the host turns one on.
+$policy = new FinePrint\Exchange\ExportPolicy(['allow' => ['markdown']]);
+FinePrint\Agent::export($pdf, 'markdown', [], $policy);      // ok, target, mime, text, report
+FinePrint\Agent::exportToolDefinition($policy);              // target enum: ["markdown"]
+```
+
+- **`fromPortable` / the `portable` block:** content is checked closed (an
+  unknown key is refused), links are http/https/mailto, image bytes must be
+  the PNG or JPEG they claim, and the limits apply (10,000 cells, 2,000 rows,
+  64 columns, 16 images of 5 MiB, 4 MiB of text, 5,000 items; a host may
+  change them). Tables keep header rows, spans and widths; numeric columns
+  are right-aligned. Formulas are never carried, only their values.
+- **`extract`:** a read, so it is not gated. The guard runs (redact by
+  default) and every invisible, bidi-control and tag character left is
+  stripped and counted. Pages become paragraphs; PDF tables and headings are
+  not recovered, and the report says so for each page.
+- **`export`:** `text` and `markdown`. Default deny; only a host-built
+  `ExportPolicy` enables a target, and nothing an agent passes can.
+- **Reports** count and locate (JSON Pointers into the input); they never
+  carry document text.
+- **`describe($doc)`** summarises a document for the model.
+
 ## Rendering pages
 
 For hosts: render a page to PNG, in pure PHP. Serving page *images* instead of

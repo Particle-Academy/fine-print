@@ -8,6 +8,64 @@ BREAKING and says what a consumer must do.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-27
+
+Portable content: fine-print reads into, and writes from, the plain-JSON
+format the four document packages use to move content between each other
+(`fancyContent: 1`, normative in fancy-conformance 0.37.0
+`suites/exchange/SPEC.md`). No 0.4.0 was released: 0.5.0 is the floor the
+sibling readers' PDF bridges will require (`conflict: <0.5`). Nothing here is
+breaking; existing documents write the same bytes.
+
+### Added
+
+- `Agent::fromPortable($content)`: portable content to fine-print blocks,
+  `{ok, blocks, report}`. Tables keep header rows, spans and widths; numeric
+  columns are right-aligned (header included); typed values become their
+  display text (`typed-as-text`); formulas are never carried, only their
+  values (`formula-as-value`). Invalid content is refused as
+  `{ok: false, refused: {reason, path}}` and produces nothing.
+- An inline `{"type": "portable", "content": ...}` block, accepted anywhere a
+  block is (the document, a quote, a table cell). `validate()` checks it
+  closed and against the exchange limits (`content_invalid`,
+  `content_too_many_*`, `image_too_large`, `content_too_large`, with a JSON
+  Pointer). `validateAndRepair()`, `toBytes()`, `write()` and `lint()`
+  expand it through `fromPortable`, deterministically: `errors` gains one note
+  per expansion and the result gains `report`, located into your document.
+  Invalid portable content is left in place and refused, never repaired.
+- `Agent::extract($pdf, $selector, $options)`: a PDF's pages as portable
+  content, through the agent-read guard (redact by default). Every
+  zero-width, bidi-control and Unicode tag character left is stripped and
+  counted, under any policy; the report carries counts and page locations,
+  never document text. `{pages: [first, last]}`, 1-based. Not gated: it is a
+  read. `Agent::toPortable($read, ...)` is its pure half.
+- `Agent::export($pdf, $target, $options, $policy)` for `text` and `markdown`
+  (`## Page n` and escaped paragraphs). OFF by default: a host-built
+  `Exchange\ExportPolicy` enables targets, a null policy allows nothing, and
+  agent options cannot enable anything (an unknown option throws). Refusals
+  in the pinned order: `export_unsupported`, `export_disabled`,
+  `export_unavailable`, `export_refused`, then a limit code.
+  `Agent::exportToolDefinition($policy)` lists only the enabled targets.
+- `Agent::describe($doc)`: a compact summary for the model, as last-word's.
+- `Agent::validateContent($content, $options)`.
+- The JSON schema describes the portable node as `$defs.portable`, beside the
+  model (`$defs.blockOrPortable`); `$defs.block` is unchanged. The agent guide
+  has a section on it. Both are now hash-pinned.
+- Conformance: every `exchange/*` suite naming fine-print (content 56, limits
+  32, policy 25, report-kinds 40, from-fine-print 9, to-fine-print 11 rows)
+  and fine-print's half of `doc-model/shared` (20) run in the suite against
+  `particle-academy/fancy-conformance` 0.37.0, an exact require-dev pin.
+  Development only: no runtime dependency was added.
+
+### Fixed
+
+- A link with a trailing line feed was accepted. `Schema::LINK_PATTERN` ended
+  in `$`, which PCRE also matches before a final newline, so
+  `"https://example.com\n"` passed both link checks and reached the PDF's
+  `/URI`. The pattern is now anchored at the true end (`D`). Upgrade normally;
+  only such links change: validation now reports them and repair removes them,
+  keeping the text.
+
 ## [0.3.0] - 2026-10-27
 
 ### Added

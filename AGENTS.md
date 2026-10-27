@@ -265,6 +265,33 @@ Writer invariants:
 - **Images are bounded**: `Image::MAX_PIXELS`, `MAX_BYTES`, and every PNG is
   inflated once at parse to prove it is exactly what IHDR promises.
 
+## Exchange (portable content, exports)
+
+`src/Exchange`: `Content` (validation, limits, `truncateCell`, canonical
+strings), `FromPortable` (content to blocks), `ToPortable` (a guarded read to
+content), `Portable` (expands inline `portable` blocks), `Report` (the closed
+kind list, merge), `ExportPolicy` (default deny). Normative text and tests:
+fancy-conformance `suites/exchange/SPEC.md`, run by
+`tests/Unit/Exchange/ConformanceTest.php` against an EXACT require-dev pin.
+
+- **Portable content is hostile.** Every object is closed; the FIRST failure
+  is reported in SPEC section 7's order. Grids are intervals, never enumerated
+  slots, so a span of 10^9 costs nothing; image size comes from the base64
+  length and only the head is decoded for the magic check.
+- **Both JSON decodings are accepted** (arrays and stdClass). Only stdClass
+  tells `{}` from `[]`, so the conformance runner feeds rows as objects.
+- **`$defs.block` is the model; `portable` is an input** referenced beside
+  it (`$defs.blockOrPortable`). It never survives validateAndRepair or reaches
+  the writer. `doc-model/shared` reads `$defs.block`; keep it model-only.
+- **Invalid portable content is refused, never repaired.** Repairer leaves a
+  `portable` block alone; validateAndRepair returns `ok: false`.
+- **Reports carry no text.** `where` is built from indexes and fixed keys;
+  extract counts the read's findings by rule and drops excerpt and location.
+- **Exports are off by default.** Only a host `ExportPolicy` enables one;
+  agent options are `selector`, `headerRows`, `display`, anything else throws.
+- extract strips `AgentReadGuard::INVISIBLE` (one definition) under every
+  guard policy.
+
 ## The trust boundary is the whole package
 
 Every byte of a PDF is attacker-authored, and every function here is reachable

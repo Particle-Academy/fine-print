@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace FinePrint\Writer;
 
 use FinePrint\Agent;
+use FinePrint\Exchange\Portable;
 use FinePrint\Writer\Pdf\Syntax;
 
 /**
@@ -33,6 +34,13 @@ final class Linter
     public function lint(array $doc, array $options = []): array
     {
         $errors = Agent::validate($doc);
+        if ($errors === []) {
+            // Lint what will be written: portable blocks expanded, then checked
+            // again as the ordinary blocks they became.
+            $x = Portable::expand($doc);
+            $doc = $x['doc'];
+            $errors = $x['expanded'] ? Agent::validate($doc) : [];
+        }
         if ($errors !== []) {
             return array_map(fn (array $e) => ['rule' => 'schema', 'severity' => 'error', 'path' => $e['path'], 'message' => $e['message']], $errors);
         }

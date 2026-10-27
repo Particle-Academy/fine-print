@@ -119,6 +119,11 @@ final class Repairer
                 return null;
             }
         }
+        if ($type === 'portable') {
+            // Content that expanded is already gone; what is left did not
+            // validate, and is refused rather than guessed at or dropped.
+            return $block;
+        }
         if ($type === 'chart') {
             $this->note("{$path}.type", 'dropped a chart block: charts are not drawn in a PDF yet, so put its figures in a table');
 

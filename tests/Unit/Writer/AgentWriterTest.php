@@ -9,8 +9,18 @@ use FinePrint\Agent;
  * and deterministic output.
  */
 
-/** Agent guide hash, over LF-normalised content. Edit the guide, then this. */
-const FPW_GUIDE_SHA256 = 'd747601efcbfdf3cf5d671697b0ca03386a55e90b6c97ec9bca2b90ded48d643';
+/**
+ * Agent guide hash, over LF-normalised content. Edit the guide, then this.
+ * 0.5.0: the portable-block section and extract/describe.
+ */
+const FPW_GUIDE_SHA256 = '53ffa434ed5485e8578be6e762d953aa0a6547495f867e6f42538fb7a311435f';
+
+/**
+ * JSON schema hash: the model an agent is given. A change to it is a change
+ * to every agent's tool definition, so it moves deliberately, with the guide.
+ * 0.5.0: the inline portable node ($defs.portable, $defs.blockOrPortable).
+ */
+const FPW_SCHEMA_SHA256 = 'a800c2f558ababa0296e1167bc8a8e466f4d528fb7c4e3471abef67235d63fb4';
 
 function fpwRules(array $findings): array
 {
@@ -133,6 +143,12 @@ it('ships the agent guide, hash-pinned', function () {
 
     expect(hash('sha256', str_replace("\r\n", "\n", $guide)))->toBe(FPW_GUIDE_SHA256)
         ->and($guide)->toStartWith('# Agent guide:');
+});
+
+it('ships the JSON schema, hash-pinned', function () {
+    $json = json_encode(Agent::jsonSchema(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+
+    expect(hash('sha256', $json))->toBe(FPW_SCHEMA_SHA256);
 });
 
 it('writes the same bytes every time, compressed or not', function () {

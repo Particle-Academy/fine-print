@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace FinePrint\Writer;
 
 use FinePrint\Exceptions\ImageException;
+use FinePrint\Exchange\Content;
+use FinePrint\Exchange\Portable;
 use FinePrint\Writer\Images\Image;
 
 /**
@@ -154,13 +156,23 @@ final class Validator
 
             return;
         }
+        if ($type === Portable::TYPE) {
+            // Portable content from another package: checked closed and against
+            // the exchange limits; expanded by validateAndRepair and on write.
+            $check = Content::validate($block['content'] ?? null);
+            if (! $check['ok']) {
+                $this->error("{$path}.content", "portable content is invalid: {$check['code']} at \"{$check['path']}\" (fancyContent 1; see the exchange spec)");
+            }
+
+            return;
+        }
         if ($type === 'chart') {
             $this->error("{$path}.type", 'chart blocks are not drawn in a PDF yet; put the figures in a table (validateAndRepair drops the chart)');
 
             return;
         }
         if (! in_array($type, Schema::BLOCK_TYPES, true)) {
-            $this->error("{$path}.type", "unknown block type \"{$type}\" (expected one of: ".implode(', ', Schema::BLOCK_TYPES).')');
+            $this->error("{$path}.type", "unknown block type \"{$type}\" (expected one of: ".implode(', ', Schema::BLOCK_TYPES).', or portable)');
 
             return;
         }

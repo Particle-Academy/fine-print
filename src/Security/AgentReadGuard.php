@@ -49,8 +49,11 @@ final class AgentReadGuard
      * are low: they are legitimate in emoji sequences and in Arabic, Hebrew,
      * Persian and Indic text, so they are reported without being acted on at
      * the default threshold.
+     *
+     * Public because portable-content extraction strips exactly this class
+     * (exchange SPEC section 10, guard v1); one definition, not two.
      */
-    private const INVISIBLE = '/[\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2060}-\x{2064}\x{2066}-\x{2069}\x{FEFF}\x{180E}\x{061C}\x{E0000}-\x{E007F}]+/u';
+    public const INVISIBLE = '/[\x{200B}-\x{200F}\x{202A}-\x{202E}\x{2060}-\x{2064}\x{2066}-\x{2069}\x{FEFF}\x{180E}\x{061C}\x{E0000}-\x{E007F}]+/u';
 
     private readonly int $threshold;
 

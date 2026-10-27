@@ -47,7 +47,7 @@ final class Schema
     public const MAX_TEXT_SIZE = 400;
 
     /** The only link schemes a PDF from this writer can carry. */
-    public const LINK_PATTERN = '#^(https?://|mailto:)[\x21-\x7E]+$#';
+    public const LINK_PATTERN = '#^(https?://|mailto:)[\x21-\x7E]+$#D';
 
     /**
      * JSON Schema for the model, for LLM tool registration.
@@ -145,7 +145,10 @@ final class Schema
                 'children' => ['type' => 'array', 'items' => ['$ref' => '#/$defs/listItem']],
             ] + $paragraphProps,
         ];
-        $blockRef = ['$ref' => '#/$defs/block'];
+        // Wherever a block may go, a portable node may go too. `$defs.block` is
+        // the document model; `portable` is an input that validateAndRepair and
+        // the writer expand into model blocks, so it is kept beside the model.
+        $blockRef = ['$ref' => '#/$defs/blockOrPortable'];
 
         $blocks = [
             'heading' => [
@@ -295,6 +298,111 @@ final class Schema
                 'boxSides' => $boxSides,
                 'band' => $band,
                 'block' => ['oneOf' => array_values($blocks)],
+                'portable' => self::portableSchema(),
+                'portableRun' => [
+                    'type' => 'object',
+                    'required' => ['text'],
+                    'additionalProperties' => false,
+                    'properties' => [
+                        'text' => ['type' => 'string'],
+                        'bold' => ['type' => 'boolean'],
+                        'italic' => ['type' => 'boolean'],
+                        'underline' => ['type' => 'boolean'],
+                        'strike' => ['type' => 'boolean'],
+                        'code' => ['type' => 'boolean'],
+                        'link' => ['type' => 'string', 'pattern' => '^(https?://|mailto:)[!-~]+$', 'maxLength' => 2048],
+                    ],
+                ],
+                'portableListItem' => [
+                    'type' => 'object',
+                    'required' => ['runs'],
+                    'additionalProperties' => false,
+                    'properties' => [
+                        'runs' => ['type' => 'array', 'items' => ['$ref' => '#/$defs/portableRun']],
+                        'children' => ['type' => 'array', 'items' => ['$ref' => '#/$defs/portableListItem']],
+                    ],
+                ],
+                'blockOrPortable' => ['oneOf' => [['$ref' => '#/$defs/block'], ['$ref' => '#/$defs/portable']]],
+            ],
+        ];
+    }
+
+    /**
+     * The inline portable node and the `fancyContent: 1` format it carries
+     * (fancy-conformance `suites/exchange/SPEC.md`). Every object is closed.
+     * The validator enforces what JSON Schema cannot say: the grid is a
+     * rectangle, runs spell the cell's display text, image bytes match their
+     * mime, and the exchange limits.
+     *
+     * @return array<string, mixed>
+     */
+    private static function portableSchema(): array
+    {
+        $runs = ['type' => 'array', 'items' => ['$ref' => '#/$defs/portableRun']];
+        $closed = fn (array $props, array $required = []) => ['type' => 'object', 'additionalProperties' => false, 'properties' => $props] + ($required === [] ? [] : ['required' => $required]);
+        $cell = $closed([
+            't' => ['enum' => ['string', 'number', 'bool', 'date', 'datetime', 'empty', 'error']],
+            'v' => ['description' => 'The typed value: a string, number or boolean; date YYYY-MM-DD; datetime YYYY-MM-DDTHH:MM:SSZ; error a string starting with #. Absent for empty.'],
+            'text' => ['type' => 'string', 'description' => 'The display string the source showed, when it differs from the value.'],
+            'format' => $closed([
+                'kind' => ['enum' => ['number', 'currency', 'percent', 'date', 'datetime', 'text']],
+                'decimals' => ['type' => 'integer', 'minimum' => 0, 'maximum' => 10],
+                'currency' => ['type' => 'string', 'pattern' => '^[A-Z]{3}$'],
+            ], ['kind']),
+            'formula' => ['type' => 'string', 'minLength' => 1, 'description' => 'Metadata only: never evaluated, never written. The value is written.'],
+            'colSpan' => ['type' => 'integer', 'minimum' => 1],
+            'rowSpan' => ['type' => 'integer', 'minimum' => 1],
+            'align' => ['enum' => ['left', 'center', 'right']],
+            'runs' => $runs,
+        ], ['t']);
+        $listItem = $closed(['runs' => $runs, 'children' => ['type' => 'array', 'items' => ['$ref' => '#/$defs/portableListItem']]], ['runs']);
+
+        $content = $closed([
+            'fancyContent' => ['const' => 1],
+            'source' => ['type' => 'object', 'description' => 'Where the content came from: {package, kind, version, sourceKind, selector}.'],
+            'items' => ['type' => 'array', 'items' => ['oneOf' => [
+                $closed([
+                    'type' => ['const' => 'table'],
+                    'caption' => ['type' => 'string'],
+                    'headerRows' => ['type' => 'integer', 'minimum' => 0],
+                    'columns' => ['type' => 'array', 'items' => $closed(['width' => ['type' => 'number', 'exclusiveMinimum' => 0], 'align' => ['enum' => ['left', 'center', 'right']]])],
+                    'rows' => ['type' => 'array', 'minItems' => 1, 'items' => $closed(['cells' => ['type' => 'array', 'minItems' => 1, 'items' => $cell]], ['cells'])],
+                ], ['type', 'rows']),
+                $closed([
+                    'type' => ['const' => 'text'],
+                    'role' => ['enum' => ['heading', 'paragraph']],
+                    'level' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 6, 'description' => 'Required for a heading, forbidden otherwise.'],
+                    'runs' => $runs,
+                ], ['type', 'role', 'runs']),
+                $closed([
+                    'type' => ['const' => 'list'],
+                    'ordered' => ['type' => 'boolean'],
+                    'items' => ['type' => 'array', 'minItems' => 1, 'items' => ['$ref' => '#/$defs/portableListItem']],
+                ], ['type', 'items']),
+                $closed([
+                    'type' => ['const' => 'image'],
+                    'ref' => ['type' => 'string', 'description' => 'A key of `images`. Never a URL or a path.'],
+                    'alt' => ['type' => 'string'],
+                    'widthPx' => ['type' => 'number', 'exclusiveMinimum' => 0],
+                    'heightPx' => ['type' => 'number', 'exclusiveMinimum' => 0],
+                ], ['type', 'ref']),
+            ]]],
+            'images' => [
+                'type' => 'object',
+                'propertyNames' => ['pattern' => '^[A-Za-z0-9_-]{1,64}$'],
+                'additionalProperties' => $closed(['mime' => ['enum' => ['image/png', 'image/jpeg']], 'data' => ['type' => 'string', 'description' => 'Standard base64 of the PNG or JPEG bytes.']], ['mime', 'data']),
+            ],
+            'report' => ['type' => 'object', 'description' => 'What the reader lost or approximated: {dropped, approximated, guard}.'],
+        ], ['fancyContent', 'items']);
+
+        return [
+            'type' => 'object',
+            'required' => ['type', 'content'],
+            'additionalProperties' => false,
+            'description' => 'Portable content (fancyContent 1) from another document package, e.g. a spreadsheet range from holy-sheet extract(). Placed as is: validateAndRepair and the writer expand it into headings, paragraphs, lists, images and tables (numbers right-aligned, header rows marked). Pass it through unchanged rather than retyping it.',
+            'properties' => [
+                'type' => ['const' => 'portable'],
+                'content' => $content,
             ],
         ];
     }
