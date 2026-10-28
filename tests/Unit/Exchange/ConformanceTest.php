@@ -26,7 +26,7 @@ use ParticleAcademy\Conformance\Conformance;
  * exactly that difference. The implementation accepts both decodings; the
  * object one is the one that can tell the two apart, so it is the one tested.
  */
-const FPX_PINNED_SUITE_VERSION = '0.37.0';
+const FPX_PINNED_SUITE_VERSION = '0.38.0';
 
 /** The suites this package is named an implementation of, with a floor each. */
 const FPX_SUITES = [

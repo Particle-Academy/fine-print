@@ -8,6 +8,33 @@ BREAKING and says what a consumer must do.
 
 ## [Unreleased]
 
+Tests and tooling only: no change to anything a consumer installs.
+
+### Added
+
+- **The conformance exporter for the ports**, `tests/Conformance/Export.php`
+  (`composer conformance:export`). It writes the `fine-print/php-semantics`,
+  `writer-model` and `writer-bytes` suites (90 / 57 / 51 rows) and their
+  fixtures into the sibling fancy-conformance checkout. These rows are what
+  fine-print-js and fine-print-py are held to. `ConformanceTest` proves this
+  package passes all of its own exported rows after the trip through JSON and
+  the loader. `DriftTest` re-exports to a temporary directory and fails if
+  anything moved, so a change to the writer's output is a reviewed contract
+  change.
+- **The sabotage lists, in-repo** (`tests/Sabotage/lists/`, run with
+  `php tests/Sabotage/run.php`). They used to live only in the envelope's
+  gitignored sandbox, where 3 of their 73 edits had silently stopped applying.
+  `SabotageListsTest` now fails the ordinary suite when an edit no longer
+  applies. Full pass on 2026-10-27: 69 of 72 cases go red. `pixel cap removed`,
+  `miter limit ignored (golden)` and `no cull` stay green and are open
+  findings.
+
+### Changed
+
+- require-dev pins `particle-academy/fancy-conformance` at exactly `0.38.0`
+  (from `0.37.0`). That release adds file references and the `fine-print/*`
+  suites, and changes no existing suite.
+
 ## [0.5.0] - 2026-10-27
 
 Portable content: fine-print reads into, and writes from, the plain-JSON
