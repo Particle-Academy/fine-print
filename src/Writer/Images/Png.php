@@ -192,6 +192,10 @@ final class Png
         $key = $this->transparencyKey();
         $max = (1 << $this->bitDepth) - 1;
         $bpp = max(1, intdiv($bitsPerPixel, 8));
+        $whole = ! $this->interlaced && $this->bitDepth === 8 && $this->colorType === 6;
+        if ($whole) {
+            [$color, $alpha] = ['', ''];
+        }
 
         $at = 0;
         foreach ($passes as $i => [$x0, $y0, $dx, $dy]) {
@@ -205,6 +209,15 @@ final class Png
                 $line = self::unfilter($filter, substr($raw, $at + 1, $rowBytes), $prev, $bpp);
                 $at += 1 + $rowBytes;
                 $prev = $line;
+                // The common chart: 8-bit RGBA, not interlaced. A row at a time, the
+                // same result as the pixel loop below in under half the time on a
+                // large image. Filled in order, so never spliced into place.
+                if ($whole) {
+                    $color .= (string) preg_replace('/(...)./s', '$1', $line);
+                    $alpha .= (string) preg_replace('/...(.)/s', '$1', $line);
+
+                    continue;
+                }
                 $samples = self::samples($line, $pw * $channels, $this->bitDepth);
                 $y = $y0 + $r * $dy;
                 for ($c = 0; $c < $pw; $c++) {

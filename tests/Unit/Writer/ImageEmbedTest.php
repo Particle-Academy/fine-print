@@ -134,6 +134,18 @@ it('turns palette transparency into a soft mask', function () {
         ->and(bin2hex($img['smask']))->toBe('0080ff');
 });
 
+it('writes an 8-bit RGBA PNG the same through the row-at-a-time path as through the pixel loop', function (int $filter) {
+    // Interlacing forces the pixel loop, so this is a differential test of the
+    // fast path, every filter type included: same colour, same soft mask, same bytes.
+    $px = fn (int $x, int $y) => [($x * 37) % 256, ($y * 53) % 256, ($x ^ $y) % 256, ($x * $y * 11) % 256];
+    $plain = fpwImages(fpwWrite(fpwImageDoc(ImageBuilder::dataUrl(ImageBuilder::png(23, 17, 6, 8, $px, filter: $filter), 'image/png'))))[0];
+    $laced = fpwImages(fpwWrite(fpwImageDoc(ImageBuilder::dataUrl(ImageBuilder::png(23, 17, 6, 8, $px, interlace: true), 'image/png'))))[0];
+
+    expect($plain['data'])->toBe($laced['data'])
+        ->and($plain['smask'])->toBe($laced['smask'])
+        ->and($plain['smask'])->not->toBeNull();
+})->with(['none' => [0], 'sub' => [1], 'up' => [2], 'average' => [3], 'paeth' => [4]]);
+
 it('de-interlaces an Adam7 PNG to the same pixels', function () {
     $px = fn ($x, $y) => [($x * 31 + $y) % 256, ($y * 17) % 256, ($x ^ $y) % 256];
     $plain = fpwImages(fpwWrite(fpwImageDoc(ImageBuilder::dataUrl(ImageBuilder::png(13, 11, 2, 8, $px), 'image/png'))))[0];
