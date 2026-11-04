@@ -8,6 +8,8 @@ BREAKING and says what a consumer must do.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-03
+
 ### Changed
 
 - **`maxRatio` now defaults to 1,500:1, up from 500:1.** 500 refused legitimate flat
