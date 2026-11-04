@@ -12,15 +12,17 @@ use FinePrint\Agent;
 /**
  * Agent guide hash, over LF-normalised content. Edit the guide, then this.
  * 0.5.0: the portable-block section and extract/describe.
+ * Mixed pages: page on a break, bands, keepNext on more blocks, footnotes, warnings.
  */
-const FPW_GUIDE_SHA256 = '53ffa434ed5485e8578be6e762d953aa0a6547495f867e6f42538fb7a311435f';
+const FPW_GUIDE_SHA256 = 'b5f2667b5deb08965200d10b27fed802fcf9105cbf6d32061a1566403f918d0b';
 
 /**
  * JSON schema hash: the model an agent is given. A change to it is a change
  * to every agent's tool definition, so it moves deliberately, with the guide.
  * 0.5.0: the inline portable node ($defs.portable, $defs.blockOrPortable).
+ * Mixed pages: pageBreak.page, the bands, pageMargins, footnote, meta, keepNext.
  */
-const FPW_SCHEMA_SHA256 = 'a800c2f558ababa0296e1167bc8a8e466f4d528fb7c4e3471abef67235d63fb4';
+const FPW_SCHEMA_SHA256 = '983d807a65041b0058557e1ec47cd82abaa14d31eebb8eb08679cdbd11ef7905';
 
 function fpwRules(array $findings): array
 {

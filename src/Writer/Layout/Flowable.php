@@ -33,6 +33,12 @@ abstract class Flowable
         return $this->height();
     }
 
+    /** @return list<int> the footnotes whose marks this block holds, in reading order */
+    public function notes(): array
+    {
+        return [];
+    }
+
     /** @return array{0: Flowable, 1: Flowable}|null */
     public function split(float $avail): ?array
     {

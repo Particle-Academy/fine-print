@@ -24,7 +24,7 @@ const FPC_PINNED_SUITE_VERSION = '0.38.0';
 /** Exact row counts. A row lost between the exporter and the loader fails here. */
 const FPC_ROWS = [
     'fine-print/php-semantics' => 90,
-    'fine-print/writer-model' => 57,
+    'fine-print/writer-model' => 109,
     'fine-print/writer-bytes' => 51,
 ];
 

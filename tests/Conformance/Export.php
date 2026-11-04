@@ -10,6 +10,7 @@ use FinePrint\Tests\Support\ImageBuilder;
 use FinePrint\Writer\Describer;
 use FinePrint\Writer\Fonts\StandardFont;
 use FinePrint\Writer\Pdf\Syntax;
+use FinePrint\Writer\Schema;
 
 /**
  * The exporter for the `fine-print/*` suites in fancy-conformance.
@@ -41,6 +42,11 @@ use FinePrint\Writer\Pdf\Syntax;
 final class Export
 {
     public const SINCE = '0.38.0';
+
+    /** The fancy-conformance release these rows join. */
+    public const SINCE_MIXED_PAGES = '0.44.0';
+
+    private ?string $since = null;
 
     /** The three writer suites. Reader and renderer suites join in later phases. */
     public const SUITES = ['fine-print/php-semantics', 'fine-print/writer-model', 'fine-print/writer-bytes'];
@@ -452,6 +458,93 @@ final class Export
 
         $this->add($s, 'json-schema', 'The JSON schema an agent is given', 'jsonSchema', (object) [], 'Every port ships this exact model. Compared as a value (key order free); PHP writes an empty object as [], see SPEC.', ['agent']);
         $this->add($s, 'guide', 'The agent guide, LF-normalised', 'guide', (object) [], 'The guide is shipped as a file, identical in every port.', ['agent']);
+
+        $this->writerModelMixedPages($para);
+    }
+
+    /**
+     * Mixed page orientation, bands, keepNext and footnotes. New rows go AFTER
+     * every existing one, so no earlier id moves. A port's model functions are
+     * held to these once it takes the vocabulary; `lint` rows that lay pages out
+     * need its layout too.
+     *
+     * @param  \Closure(string, array<string, mixed>=): array<string, mixed>  $para
+     */
+    private function writerModelMixedPages(\Closure $para): void
+    {
+        $s = 'fine-print/writer-model';
+        $this->since = self::SINCE_MIXED_PAGES;
+        $break = fn (array|object $page) => ['type' => 'pageBreak', 'page' => $page];
+        $note = fn (string $t) => ['text' => '', 'footnote' => ['blocks' => [$para($t)]]];
+        $tags = ['mixed-pages'];
+        $land = ['orientation' => 'landscape', 'margins' => ['left' => 28.8, 'right' => 28.8]];
+
+        foreach ([
+            ['break-page', 'A break carrying page settings', ['blocks' => [$para('A'), $break($land), $para('B')]]],
+            ['break-page-empty', 'An empty page: a new stretch with nothing changed', ['blocks' => [$para('A'), $break((object) []), $para('B')]]],
+            ['break-page-bands', 'Every band and both distances, on the page and on a break', ['page' => ['margins' => ['header' => 14, 'footer' => 14], 'header' => ['blocks' => [$para('H {page}')]], 'firstHeader' => ['blocks' => []], 'evenFooter' => ['left' => 'E']],
+                'blocks' => [$para('A'), $break(['footer' => ['blocks' => [['type' => 'hr'], $para('F')]], 'firstFooter' => ['left' => 'first']])]]],
+            ['break-page-background', 'page.background on a break is refused', ['blocks' => [$break(['background' => '#FDFAF3'])]]],
+            ['break-page-nested-quote', 'page on a break in a quote is refused', ['blocks' => [['type' => 'quote', 'blocks' => [$break($land)]]]]],
+            ['break-page-nested-cell', 'page on a break in a table cell is refused', ['blocks' => [['type' => 'table', 'rows' => [['cells' => [['blocks' => [$break([])]]]]]]]]],
+            ['break-page-not-object', 'page on a break must be an object', ['blocks' => [['type' => 'pageBreak', 'page' => 'landscape']]]],
+            ['break-page-own-rules', 'A break\'s page faces the page object\'s rules, at its own path', ['blocks' => [$break(['orientation' => 'sideways', 'margins' => ['header' => -1], 'footer' => 'text'])]]],
+            ['break-page-inherited-margins', 'Margins are judged against the paper they inherit', ['page' => ['orientation' => 'landscape', 'margins' => ['left' => 300, 'right' => 300]], 'blocks' => [$break(['orientation' => 'portrait'])]]],
+            ['sections', 'There is no sections key', ['sections' => [['blocks' => [$para('x')]]], 'blocks' => []]],
+            ['band-mixed', 'A band is one line or blocks, never both', ['page' => ['footer' => ['left' => 'x', 'blocks' => [$para('y')]]], 'blocks' => []]],
+            ['band-refused', 'A band refuses a page break at any depth', ['page' => ['header' => ['blocks' => [['type' => 'quote', 'blocks' => [['type' => 'pageBreak']]]]]], 'blocks' => []]],
+            ['band-footnote', 'A band refuses a footnote', ['page' => ['footer' => ['blocks' => [['type' => 'paragraph', 'runs' => [$note('n')]]]]], 'blocks' => []]],
+            ['footnote', 'A footnote run', ['blocks' => [['type' => 'paragraph', 'runs' => [['text' => 'x'], $note('n')]]]]],
+            ['footnote-text', 'A footnote run\'s text must be ""', ['blocks' => [['type' => 'paragraph', 'runs' => [['text' => 'x', 'footnote' => ['blocks' => [$para('n')]]]]]]]],
+            ['footnote-empty', 'A footnote needs blocks', ['blocks' => [['type' => 'paragraph', 'runs' => [['text' => '', 'footnote' => ['blocks' => []]]]]]]],
+            ['footnote-nested', 'A footnote cannot hold a footnote', ['blocks' => [['type' => 'paragraph', 'runs' => [['text' => '', 'footnote' => ['blocks' => [['type' => 'paragraph', 'runs' => [$note('in')]]]]]]]]]],
+            ['keepnext-blocks', 'keepNext on a table, image-less code and a rule', ['blocks' => [['type' => 'table', 'keepNext' => true, 'rows' => []], ['type' => 'code', 'text' => 'x', 'keepNext' => false], ['type' => 'hr', 'keepNext' => true]]]],
+            ['keepnext-not-boolean', 'keepNext must be a boolean on those too', ['blocks' => [['type' => 'table', 'keepNext' => 'yes', 'rows' => []], ['type' => 'code', 'text' => 'x', 'keepNext' => 1], ['type' => 'hr', 'keepNext' => 'no']]]],
+            ['meta', 'meta: author is text, and the title is not here', ['meta' => ['author' => 7, 'title' => 'T'], 'blocks' => []]],
+        ] as [$slug, $title, $doc]) {
+            $this->add($s, 'validate-'.$slug, $title, 'validate', ['doc' => $doc], null, $tags);
+        }
+        foreach (Schema::PAGE_KEYS as $key) {
+            $value = match ($key) {
+                'size' => 'a4', 'orientation' => 'landscape', 'background' => '#FFFFFF',
+                'margins' => ['left' => 10], 'border' => ['width' => 1], default => ['left' => 'x'],
+            };
+            $this->add($s, 'validate-near-miss-'.strtolower($key), "{$key} on the break itself is a near-miss naming page", 'validate', ['doc' => ['blocks' => [['type' => 'pageBreak', $key => $value]]]], null, $tags);
+        }
+        foreach ([
+            ['page-kept', 'An unrelated repair keeps page', ['blocks' => ['coerced', $break($land), $para('B')]]],
+            ['page-empty-kept', 'An unrelated repair keeps an empty page', ['blocks' => ['coerced', $break((object) [])]]],
+            ['near-miss-moved', 'Near-miss keys move into page, each with a note', ['blocks' => [['type' => 'pageBreak', 'orientation' => 'landscape', 'margins' => ['left' => 30]]]]],
+            ['near-miss-page-wins', 'page wins over a near-miss of the same key', ['blocks' => [['type' => 'pageBreak', 'orientation' => 'portrait', 'page' => ['orientation' => 'landscape']]]]],
+            ['background-dropped', 'A background on a break is removed, and said so', ['blocks' => [$break(['background' => '#FDFAF3', 'orientation' => 'landscape'])]]],
+            ['nested-page-dropped', 'A page on a nested break is removed, and said so', ['blocks' => [['type' => 'quote', 'blocks' => [$break($land)]]]]],
+            ['sections-refused', 'sections stays refused: ok false, nothing is lost quietly', ['sections' => [['blocks' => [$para('x')]]], 'blocks' => []]],
+            ['band-blocks', 'A band\'s blocks are repaired under a band\'s rules', ['page' => ['footer' => ['left' => 'gone', 'blocks' => ['line', ['type' => 'pageBreak'], ['type' => 'paragraph', 'runs' => [$note('n')]]]]], 'blocks' => []]],
+            ['break-band-blocks', 'So are a break\'s', ['blocks' => [$break(['header' => ['blocks' => ['line']]])]]],
+            ['footnote-run', 'A footnote run is repaired as last-word repairs one', ['blocks' => [['type' => 'paragraph', 'runs' => [
+                ['text' => 'typed', 'footnote' => 'A string note'], ['footnote' => [$para('A bare list')]], ['text' => '', 'footnote' => ['blocks' => [$para('kept'), ['type' => 'pageBreak']]]], ['text' => '', 'footnote' => ['blocks' => 7]],
+            ]]]]],
+            ['meta-title', 'meta.title moves to the title', ['meta' => ['title' => 'T', 'author' => 'A'], 'blocks' => []]],
+            ['keepnext-removed', 'An invalid keepNext is removed; a valid one on a rule survives', ['blocks' => ['coerced', ['type' => 'table', 'keepNext' => 'yes', 'rows' => []], ['type' => 'hr', 'keepNext' => true]]]],
+        ] as [$slug, $title, $doc]) {
+            $this->add($s, 'repair-'.$slug, $title, 'validateAndRepair', ['doc' => $doc], null, $tags);
+        }
+        $this->add($s, 'describe-stretches', 'Stretches, bands and footnotes are described', 'describe', ['doc' => ['page' => ['firstFooter' => ['blocks' => []]], 'blocks' => [
+            $para('A'), $break(['orientation' => 'landscape']), ['type' => 'paragraph', 'runs' => [['text' => 'B'], $note('n')]], $break(['orientation' => 'portrait']),
+        ]]], null, $tags);
+        foreach ([
+            ['field-literal', ['page' => ['footer' => ['left' => '{date}', 'center' => '{time:HH:mm}', 'right' => '{filename}']], 'blocks' => [$para('x')]]],
+            ['field-literal-blocks', ['page' => ['footer' => ['blocks' => [$para('{date:d MMMM yyyy}')]]], 'blocks' => [$para('x')]]],
+            ['field-literal-on-break', ['blocks' => [$para('x'), $break(['footer' => ['left' => '{date}']]), $para('y')]]],
+            ['band-overlap-distance', ['page' => ['margins' => ['header' => 30, 'top' => 36], 'header' => ['left' => 'H']], 'blocks' => [$para('x')]]],
+            ['code-language', ['blocks' => [['type' => 'code', 'language' => 'php', 'text' => 'x']]]],
+            ['footnote-placeholder', ['blocks' => [['type' => 'paragraph', 'runs' => [['text' => 'x'], $note('TODO')]]]]],
+            ['band-placeholder', ['page' => ['header' => ['blocks' => [$para('[Insert date]')]]], 'blocks' => [$para('x')]]],
+            ['mixed-sparse', ['blocks' => [$break(['orientation' => 'landscape']), $para('x')]]],
+        ] as [$slug, $doc]) {
+            $this->add($s, 'lint-'.$slug, 'Lint: '.$slug, 'lint', ['doc' => $doc], null, ['lint', ...$tags]);
+        }
+        $this->since = null;
     }
 
     // ----------------------------------------------------------- writer-bytes
@@ -621,7 +714,7 @@ final class Export
             $tags[] = 'needs-reader';
         }
 
-        $row = ['id' => $id, 'title' => $title, 'since' => self::SINCE];
+        $row = ['id' => $id, 'title' => $title, 'since' => $this->since ?? self::SINCE];
         if ($tags !== []) {
             $row['tags'] = array_values(array_unique($tags));
         }

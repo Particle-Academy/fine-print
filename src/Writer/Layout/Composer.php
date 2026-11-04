@@ -48,7 +48,34 @@ final class Composer
 
     private const CONTROLS = '/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F\x{80}-\x{9F}]/u';
 
+    /** Size of a footnote's text and of the number beside it, as last-word-ui has them. */
+    private const NOTE_SIZE = 10.0;
+
+    private const NOTE_NUMBER_SCALE = 0.65;
+
+    /**
+     * How far a mark rises above its line, as a share of the text it follows.
+     * Held at 0.3 on purpose: a reader groups text into a line within half the
+     * smaller size (`Text\Layout`, 0.325 of the text here). Any higher and the mark
+     * reads back as a line of its own, before the sentence it belongs to.
+     */
+    private const NOTE_MARK_RISE = 0.3;
+
     private LineBreaker $breaker;
+
+    private float $bodyHeight = 0.0;
+
+    /** 'body', 'band' or 'note': only a run in the body makes a footnote. */
+    private string $mode = 'body';
+
+    /** The width a footnote sets at: the page's column, wherever its mark is. */
+    private float $noteWidth = 0.0;
+
+    /** @var array<int, FootnoteFlow> every footnote so far, numbered in reading order */
+    private array $notes = [];
+
+    /** @var array<string, string>|null a band's token values while it composes */
+    private ?array $fields = null;
 
     /** @param array<string, mixed> $doc */
     public function __construct(
@@ -56,33 +83,83 @@ final class Composer
         private readonly ImageStore $images,
         private readonly Diagnostics $diagnostics,
         private readonly array $doc,
-        private readonly float $bodyHeight,
     ) {
         $this->breaker = new LineBreaker($diagnostics);
     }
 
     /**
-     * @param  list<mixed>  $blocks
+     * @param  array<int, mixed>  $blocks  keys are the blocks' indexes in the document, which a finding's path names
      * @return list<Flowable>
      */
-    public function compose(array $blocks, float $width): array
+    public function compose(array $blocks, float $width, float $bodyHeight): array
     {
+        $this->bodyHeight = $bodyHeight;
+        $this->noteWidth = $width;
+
         return $this->flow($blocks, $width, $this->baseContext(), 'blocks');
     }
 
+    /** @return array<int, FootnoteFlow> every footnote composed so far, by number */
+    public function footnotes(): array
+    {
+        return $this->notes;
+    }
+
     /**
-     * One line of a running header or footer.
+     * The lines of one slot of a running header or footer: more than one only
+     * when the text itself holds a line break.
      *
      * @param  array<string, mixed>  $band
+     * @param  array<string, string>  $fields
+     * @return list<Line>
      */
-    public function bandLine(string $text, array $band, string $path): Line
+    public function bandLines(string $text, array $band, array $fields, string $path): array
     {
         $ctx = $this->baseContext();
         $ctx['size'] = (float) ($band['size'] ?? 9);
         $ctx['color'] = is_string($band['color'] ?? null) ? $band['color'] : '#6B7280';
         $style = $this->style([], $ctx, $path);
+        $text = $this->clean($this->expandFields($text, $fields, $path), $path);
 
-        return $this->breaker->lines([['text' => $this->clean($text, $path), 'style' => $style]], 1.0e6, 1.0, $style, $path)[0];
+        return $this->breaker->lines([['text' => $text, 'style' => $style]], 1.0e6, 1.0, $style, $path);
+    }
+
+    /**
+     * A blocks band, composed at the page's column with its tokens resolved.
+     *
+     * @param  list<mixed>  $blocks
+     * @param  array<string, string>  $fields
+     */
+    public function bandBox(array $blocks, float $width, float $pageHeight, array $fields, string $path): BandBox
+    {
+        [$mode, $held, $this->mode, $this->fields] = [$this->mode, $this->fields, 'band', $fields];
+        $body = $this->bodyHeight;
+        $this->bodyHeight = $pageHeight;
+        try {
+            return new BandBox($this->flow($blocks, $width, $this->baseContext(), $path));
+        } finally {
+            [$this->mode, $this->fields, $this->bodyHeight] = [$mode, $held, $body];
+        }
+    }
+
+    /**
+     * Text with its tokens replaced, in one pass, so a value is never read for
+     * tokens of its own. A token a PDF cannot honour stays as written, and is
+     * reported: the writer stamps no time and does not know the file's name.
+     *
+     * @param  array<string, string>  $fields
+     */
+    private function expandFields(string $text, array $fields, string $path): string
+    {
+        return (string) preg_replace_callback(Schema::FIELD_TOKEN, function (array $m) use ($fields, $path): string {
+            $name = ($m[1] ?? '') !== '' ? $m[1] : '';
+            if ($name !== '' && array_key_exists($name, $fields)) {
+                return $fields[$name];
+            }
+            $this->diagnostics->add('band-field-literal', 'warning', $path, 'a PDF has no live date or time and this writer does not know the file name: {date}, {time} and {filename} are written as literal text, so put the value in the text itself');
+
+            return $m[0];
+        }, $text);
     }
 
     /** @return array{family: ?string, size: float, bold: bool, italic: bool, color: ?string} */
@@ -129,8 +206,8 @@ final class Composer
             'table' => $this->table($block, $width, $ctx, $path),
             'code' => [$this->code($block, $width, $path)],
             'quote' => $this->quote($block, $width, $ctx, $path),
-            'image' => [$this->image($block, $width, $path)],
-            'hr' => [$this->rule($width, $path)],
+            'image' => [$this->image($block, $width, $ctx, $path)],
+            'hr' => [$this->rule($block, $width, $path)],
             'pageBreak' => [new PageBreakFlow()],
             default => [],
         };
@@ -167,7 +244,7 @@ final class Composer
             self::color($block['shading'] ?? null), self::boxBorders($block['borders'] ?? null),
         );
 
-        return $this->place($flow, $block, $path, $defaults + ['spaceBefore' => 0.0, 'spaceAfter' => 8.0, 'keepNext' => false]);
+        return $this->place($flow, $block, $path, $defaults + ['spaceBefore' => 0.0, 'spaceAfter' => $ctx['after'] ?? 8.0, 'keepNext' => false]);
     }
 
     /**
@@ -211,7 +288,7 @@ final class Composer
         // The list as a whole has paragraph spacing after it.
         $last = count($out) - 1;
         if ($last >= 0 && ! $explicitAfter[$last]) {
-            $out[$last]->spaceAfter = 8.0;
+            $out[$last]->spaceAfter = $ctx['after'] ?? 8.0;
         }
 
         return $out;
@@ -335,7 +412,19 @@ final class Composer
 
         $flow = new TableFlow($cols, $outRows, $borders, $offset, $headerRows);
 
-        return [$this->place($flow, [], $path, ['spaceBefore' => 0.0, 'spaceAfter' => 8.0, 'keepNext' => false])];
+        return [$this->place($flow, self::keepOnly($block), $path, ['spaceBefore' => 0.0, 'spaceAfter' => $ctx['after'] ?? 8.0, 'keepNext' => false])];
+    }
+
+    /**
+     * Of a table, image, code block or rule, only `keepNext` is read: the
+     * spacing keys are not part of those blocks' vocabulary.
+     *
+     * @param  array<string, mixed>  $block
+     * @return array<string, mixed>
+     */
+    private static function keepOnly(array $block): array
+    {
+        return array_intersect_key($block, ['keepNext' => true]);
     }
 
     /** @param array<string, mixed> $block */
@@ -347,8 +436,11 @@ final class Composer
         $this->checkEncodable($text, $style, "{$path}.text");
         $lines = $this->breaker->hardLines($text, $style, $width - 8, 1.0, $path);
         $flow = new ParagraphFlow($lines, $width, 'left', 4.0, 4.0, Syntax::rgb(self::CODE_FILL), [], null, 4.0);
+        if (is_string($block['language'] ?? null) && $block['language'] !== '') {
+            $this->diagnostics->add('code-language', 'info', $path, 'a code language draws nothing in a PDF yet: the code is set plain, in Courier');
+        }
 
-        return $this->place($flow, [], $path, ['spaceBefore' => 0.0, 'spaceAfter' => 8.0, 'keepNext' => false]);
+        return $this->place($flow, self::keepOnly($block), $path, ['spaceBefore' => 0.0, 'spaceAfter' => 8.0, 'keepNext' => false]);
     }
 
     /**
@@ -368,9 +460,15 @@ final class Composer
         return $children;
     }
 
-    /** @param array<string, mixed> $block */
-    private function image(array $block, float $width, string $path): Flowable
+    /**
+     * @param  array<string, mixed>  $block
+     * @param  array<string, mixed>  $ctx
+     */
+    private function image(array $block, float $width, array $ctx, string $path): Flowable
     {
+        if (is_string($block['alt'] ?? null) && $block['alt'] !== '') {
+            $this->diagnostics->add('image-alt', 'info', $path, 'a PDF from this writer has no tagged structure to carry alt text yet: the image is drawn and its alt text is not stored');
+        }
         $entry = $this->images->add((string) $block['src']);
         $img = $entry['image'];
         $wpx = $block['widthPx'] ?? null;
@@ -399,12 +497,55 @@ final class Composer
             $this->diagnostics->add('image-scaled', 'info', $path, 'an image taller than the page was scaled down to fit it');
         }
 
-        return $this->place(new ImageFlow($entry['name'], $w, $h), [], $path, ['spaceBefore' => 0.0, 'spaceAfter' => 8.0, 'keepNext' => false]);
+        return $this->place(new ImageFlow($entry['name'], $w, $h), self::keepOnly($block), $path, ['spaceBefore' => 0.0, 'spaceAfter' => $ctx['after'] ?? 8.0, 'keepNext' => false]);
     }
 
-    private function rule(float $width, string $path): Flowable
+    /** @param array<string, mixed> $block */
+    private function rule(array $block, float $width, string $path): Flowable
     {
-        return $this->place(new RuleFlow($width), [], $path, ['spaceBefore' => 6.0, 'spaceAfter' => 10.0, 'keepNext' => false]);
+        return $this->place(new RuleFlow($width), self::keepOnly($block), $path, ['spaceBefore' => 6.0, 'spaceAfter' => 10.0, 'keepNext' => false]);
+    }
+
+    /**
+     * A footnote mark: its number, at 0.65 of the text around it and raised off
+     * the line. It belongs to the word before it (no space is added) and being
+     * smaller it never grows its line, so a marked paragraph has the height of an
+     * unmarked one. Numbered here, in reading order, which is the order this
+     * class meets runs: paragraphs, headings, list items and quotes in turn, and
+     * a table's rows then cells, the same walk as last-word-ui's `footnotes.ts`.
+     *
+     * @param  array<string, mixed>  $note
+     * @param  array<string, mixed>  $ctx
+     * @return array{text: string, style: TextStyle}
+     */
+    private function footnoteMark(array $note, array $ctx, string $path): array
+    {
+        $id = count($this->notes) + 1;
+        $held = $this->mode;
+        $this->mode = 'note';
+        // Reserve the number first: a note's own runs cannot hold another note.
+        try {
+            $noteCtx = ['size' => self::NOTE_SIZE, 'after' => 0.0] + $this->baseContext();
+            $base = $this->style([], $noteCtx, $path);
+            $numberStyle = new TextStyle($base->font, self::NOTE_SIZE * self::NOTE_NUMBER_SCALE, $base->color);
+            $number = $this->breaker->lines([['text' => (string) $id, 'style' => $numberStyle]], 1.0e6, 1.0 / LineBreaker::LEADING, $numberStyle, $path)[0];
+            $width = max(1.0, $this->noteWidth - $number->width - 3.0);
+            $flow = new FootnoteFlow($id, $number, new ContainerFlow($this->flow($note['blocks'] ?? [], $width, $noteCtx, "{$path}.footnote.blocks")));
+            $flow->path = "{$path}.footnote";
+            $this->notes[$id] = $flow;
+        } finally {
+            $this->mode = $held;
+        }
+        $resolved = $this->fonts->resolve($ctx['family'], $ctx['bold'], $ctx['italic']);
+        $size = (float) $ctx['size'];
+
+        return ['text' => (string) $id, 'style' => new TextStyle(
+            $resolved['font'],
+            max(Schema::MIN_TEXT_SIZE, $size * self::NOTE_NUMBER_SCALE),
+            Syntax::rgb(is_string($ctx['color'] ?? null) ? $ctx['color'] : '#000000'),
+            rise: $size * self::NOTE_MARK_RISE,
+            note: $id,
+        )];
     }
 
     /**
@@ -429,10 +570,22 @@ final class Composer
     {
         $pieces = [];
         foreach (is_array($runs) ? $runs : [] as $i => $run) {
-            if (! is_array($run) || ! is_string($run['text'] ?? null)) {
+            if (! is_array($run)) {
                 continue;
             }
-            $text = $this->clean($run['text'], "{$path}[{$i}]");
+            if (is_array($run['footnote'] ?? null)) {
+                // Validation refused one anywhere but the body.
+                if ($this->mode === 'body') {
+                    $pieces[] = $this->footnoteMark($run['footnote'], $ctx, "{$path}[{$i}]");
+                }
+
+                continue;
+            }
+            if (! is_string($run['text'] ?? null)) {
+                continue;
+            }
+            $source = $this->mode === 'band' && $this->fields !== null ? $this->expandFields($run['text'], $this->fields, "{$path}[{$i}]") : $run['text'];
+            $text = $this->clean($source, "{$path}[{$i}]");
             if ($text === '') {
                 continue;
             }

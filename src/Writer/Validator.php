@@ -32,6 +32,12 @@ final class Validator
     /** @var list<array{path: string, message: string}> */
     private array $errors = [];
 
+    /** 'body', 'band' or 'footnote': where blocks are being checked, and so what they may hold. */
+    private string $context = 'body';
+
+    /** @var array<string, array<string, mixed>> a top-level break's path => the document as its stretch sees it */
+    private array $stretchAt = [];
+
     public function __construct(private readonly int $maxImagePixels = Image::MAX_PIXELS) {}
 
     /**
@@ -41,9 +47,17 @@ final class Validator
     public function validate(array $doc): array
     {
         $this->errors = [];
+        $this->context = 'body';
+        $this->stretchAt = [];
 
         if (array_key_exists('title', $doc) && ! is_string($doc['title'])) {
             $this->error('title', 'title must be a string when present');
+        }
+        if (array_key_exists('sections', $doc)) {
+            $this->error('sections', 'there is no sections key; use pageBreak.page');
+        }
+        if (array_key_exists('meta', $doc)) {
+            $this->meta($doc['meta']);
         }
         if (isset($doc['defaultFont']) && (! is_string($doc['defaultFont']) || $doc['defaultFont'] === '')) {
             $this->error('defaultFont', 'defaultFont must be a font family name');
@@ -61,9 +75,30 @@ final class Validator
 
             return $this->errors;
         }
+        foreach (Schema::stretches($doc) as $stretch) {
+            if ($stretch['break'] !== null) {
+                $this->stretchAt["blocks[{$stretch['break']}]"] = $stretch['doc'];
+            }
+        }
         $this->blocks($doc['blocks'], 'blocks', 0);
 
         return $this->errors;
+    }
+
+    /** `meta`, as last-word has it: an object whose `author` is text; the title is the top-level `title`. */
+    private function meta(mixed $meta): void
+    {
+        if (! is_array($meta) || ($meta !== [] && array_is_list($meta))) {
+            $this->error('meta', 'meta must be an object ({author?})');
+
+            return;
+        }
+        if (array_key_exists('author', $meta) && ! is_string($meta['author'])) {
+            $this->error('meta.author', 'meta author must be text');
+        }
+        if (array_key_exists('title', $meta)) {
+            $this->error('meta.title', 'the document title is the top-level "title", not meta.title');
+        }
     }
 
     /** @param array<string, mixed> $doc */
@@ -78,56 +113,129 @@ final class Validator
 
             return;
         }
-        $this->enum($page['size'] ?? null, 'page.size', 'page size', array_keys(Schema::PAGE_SIZES));
-        $this->enum($page['orientation'] ?? null, 'page.orientation', 'page orientation', ['portrait', 'landscape']);
-        $before = count($this->errors);
-        $this->sides($page['margins'] ?? null, 'page.margins', 'page margins', true);
-        if (count($this->errors) === $before && isset($page['margins'])) {
-            [$w, $h] = Schema::pageSize($doc);
-            $m = Schema::margins($doc);
-            if ($w - $m['left'] - $m['right'] < 72 || $h - $m['top'] - $m['bottom'] < 72) {
-                $this->error('page.margins', 'margins must leave at least one inch (72pt) of text area across and down the page');
-            }
-        }
-        foreach (['header', 'footer'] as $kind) {
-            if (! isset($page[$kind])) {
-                continue;
-            }
-            $band = $page[$kind];
-            if (! is_array($band)) {
-                $this->error("page.{$kind}", "page {$kind} must be an object ({left?, center?, right?, size?, color?})");
+        $this->pageSettings($page, $doc, 'page');
+    }
 
-                continue;
+    /**
+     * A page object, wherever it sits: the document's, or a break's. `$view` is
+     * the document as this page sees it, so what is judged is what would be
+     * drawn (margins a break inherits, against the paper it turns to).
+     *
+     * @param  array<string, mixed>  $page
+     * @param  array<string, mixed>  $view
+     */
+    private function pageSettings(array $page, array $view, string $at): void
+    {
+        $this->enum($page['size'] ?? null, "{$at}.size", 'page size', array_keys(Schema::PAGE_SIZES));
+        $this->enum($page['orientation'] ?? null, "{$at}.orientation", 'page orientation', ['portrait', 'landscape']);
+        $before = count($this->errors);
+        $this->sides($page['margins'] ?? null, "{$at}.margins", 'page margins', true);
+        if (is_array($page['margins'] ?? null)) {
+            foreach (['header', 'footer'] as $distance) {
+                $this->number($page['margins'][$distance] ?? null, "{$at}.margins.{$distance}", "page margins {$distance} (the distance from the page edge to the {$distance})", nonNegative: true);
             }
-            foreach (['left', 'center', 'right'] as $slot) {
-                if (isset($band[$slot]) && ! is_string($band[$slot])) {
-                    $this->error("page.{$kind}.{$slot}", "page {$kind} {$slot} must be text");
-                }
-            }
-            $this->size($band['size'] ?? null, "page.{$kind}.size");
-            $this->hex($band['color'] ?? null, "page.{$kind}.color", "page {$kind} color");
         }
-        $this->hex($page['background'] ?? null, 'page.background', 'page background');
+        if (count($this->errors) === $before && (isset($page['margins']) || isset($page['size']) || isset($page['orientation']))) {
+            [$w, $h] = Schema::pageSize($view);
+            $m = Schema::margins($view);
+            if ($w - $m['left'] - $m['right'] < 72 || $h - $m['top'] - $m['bottom'] < 72) {
+                $this->error("{$at}.margins", 'margins must leave at least one inch (72pt) of text area across and down the page');
+            }
+        }
+        foreach (Schema::PAGE_BANDS as $kind) {
+            if (isset($page[$kind])) {
+                $this->band($page[$kind], $kind, $at);
+            }
+        }
+        $this->hex($page['background'] ?? null, "{$at}.background", 'page background');
         if (isset($page['border'])) {
             $border = $page['border'];
             if (! is_array($border)) {
-                $this->error('page.border', 'page border must be an object ({style?, width?, color?, inset?})');
+                $this->error("{$at}.border", 'page border must be an object ({style?, width?, color?, inset?})');
 
                 return;
             }
             $before = count($this->errors);
-            $this->enum($border['style'] ?? null, 'page.border.style', 'page border style', Schema::BORDER_STYLES);
-            $this->number($border['width'] ?? null, 'page.border.width', 'page border width', positive: true);
-            $this->hex($border['color'] ?? null, 'page.border.color', 'page border color');
-            $this->number($border['inset'] ?? null, 'page.border.inset', 'page border inset', nonNegative: true);
-            $frame = Schema::pageFrame($doc);
+            $this->enum($border['style'] ?? null, "{$at}.border.style", 'page border style', Schema::BORDER_STYLES);
+            $this->number($border['width'] ?? null, "{$at}.border.width", 'page border width', positive: true);
+            $this->hex($border['color'] ?? null, "{$at}.border.color", 'page border color');
+            $this->number($border['inset'] ?? null, "{$at}.border.inset", 'page border inset', nonNegative: true);
+            $frame = Schema::pageFrame($view);
             if (count($this->errors) === $before && $frame !== null) {
-                [$w, $h] = Schema::pageSize($doc);
+                [$w, $h] = Schema::pageSize($view);
                 if (2 * ($frame['inset'] + $frame['width']) >= min($w, $h)) {
-                    $this->error('page.border', 'page border inset + width must leave room inside the frame on both axes');
+                    $this->error("{$at}.border", 'page border inset + width must leave room inside the frame on both axes');
                 }
             }
         }
+    }
+
+    private function band(mixed $band, string $kind, string $at): void
+    {
+        if (! is_array($band)) {
+            $this->error("{$at}.{$kind}", "page {$kind} must be an object ({left?, center?, right?, size?, color?})");
+
+            return;
+        }
+        if (array_key_exists('blocks', $band)) {
+            $mixed = array_values(array_intersect(['left', 'center', 'right', 'size', 'color'], array_keys($band)));
+            if ($mixed !== []) {
+                $this->error("{$at}.{$kind}", "page {$kind} is either {left, center, right, size, color} or {blocks}, never both (found blocks with ".implode(', ', $mixed).')');
+            }
+            if (! is_array($band['blocks']) || ! array_is_list($band['blocks'])) {
+                $this->error("{$at}.{$kind}.blocks", "page {$kind} blocks must be a list of block objects");
+
+                return;
+            }
+            [$outer, $this->context] = [$this->context, 'band'];
+            $this->blocks($band['blocks'], "{$at}.{$kind}.blocks", 0);
+            $this->context = $outer;
+
+            return;
+        }
+        foreach (['left', 'center', 'right'] as $slot) {
+            if (isset($band[$slot]) && ! is_string($band[$slot])) {
+                $this->error("{$at}.{$kind}.{$slot}", "page {$kind} {$slot} must be text");
+            }
+        }
+        $this->size($band['size'] ?? null, "{$at}.{$kind}.size");
+        $this->hex($band['color'] ?? null, "{$at}.{$kind}.color", "page {$kind} color");
+    }
+
+    /**
+     * A page break, and what it may carry. Lenient unknown keys stay, but a key
+     * of the page object sitting on the break itself is a near-miss: it would
+     * otherwise be ignored, and the agent would think it had turned the page.
+     *
+     * @param  array<string, mixed>  $block
+     */
+    private function pageBreak(array $block, string $path, int $depth): void
+    {
+        foreach (Schema::PAGE_KEYS as $key) {
+            if (array_key_exists($key, $block)) {
+                $this->error("{$path}.{$key}", "a pageBreak has no {$key} key; use pageBreak.page");
+            }
+        }
+        if (! isset($block['page'])) {
+            return;
+        }
+        $page = $block['page'];
+        if (! Schema::isPageObject($page)) {
+            $this->error("{$path}.page", 'page on a break must be an object of page settings, {} for a new stretch with nothing changed');
+
+            return;
+        }
+        $view = $this->stretchAt[$path] ?? null;
+        if ($depth > 0 || $view === null) {
+            $this->error("{$path}.page", 'page settings go on a top-level page break; a break nested in a quote or a table cell cannot change the page');
+
+            return;
+        }
+        if (array_key_exists('background', $page)) {
+            $this->error("{$path}.page.background", 'a document has one page colour: set background on the top-level page, not on a break');
+            unset($page['background']);
+        }
+        $this->pageSettings($page, $view, "{$path}.page");
     }
 
     /** @param list<mixed> $blocks */
@@ -153,6 +261,16 @@ final class Validator
         $type = $block['type'] ?? null;
         if (! is_string($type)) {
             $this->error("{$path}.type", 'block is missing its "type" discriminator');
+
+            return;
+        }
+        if ($this->context === 'band' && in_array($type, Schema::BAND_REFUSED_TYPES, true)) {
+            $this->error("{$path}.type", "a header or footer cannot hold a {$type} block");
+
+            return;
+        }
+        if ($this->context === 'footnote' && in_array($type, Schema::FOOTNOTE_REFUSED_TYPES, true)) {
+            $this->error("{$path}.type", "a footnote cannot hold a {$type} block");
 
             return;
         }
@@ -185,8 +303,17 @@ final class Validator
             'code' => $this->code($block, $path),
             'quote' => $this->quote($block, $path, $depth),
             'image' => $this->image($block, $path),
-            'pageBreak', 'hr' => null,
+            'pageBreak' => $this->pageBreak($block, $path, $depth),
+            'hr' => $this->keepNext($block, $path),
         };
+    }
+
+    /** @param array<string, mixed> $block */
+    private function keepNext(array $block, string $path): void
+    {
+        if (isset($block['keepNext']) && ! is_bool($block['keepNext'])) {
+            $this->error("{$path}.keepNext", 'keepNext must be a boolean');
+        }
     }
 
     /** @param array<string, mixed> $block */
@@ -217,9 +344,7 @@ final class Validator
             $this->number($block[$key] ?? null, "{$path}.{$key}", $key, nonNegative: true);
         }
         $this->number($block['lineHeight'] ?? null, "{$path}.lineHeight", 'lineHeight (a multiple of single spacing)', positive: true);
-        if (isset($block['keepNext']) && ! is_bool($block['keepNext'])) {
-            $this->error("{$path}.keepNext", 'keepNext must be a boolean');
-        }
+        $this->keepNext($block, $path);
         $this->hex($block['shading'] ?? null, "{$path}.shading", 'shading');
         $this->borders($block['borders'] ?? null, "{$path}.borders", 'borders', self::BOX_EDGES);
     }
@@ -272,6 +397,7 @@ final class Validator
         $this->enum($block['align'] ?? null, "{$path}.align", 'table align', ['left', 'center', 'right']);
         $this->borders($block['borders'] ?? null, "{$path}.borders", 'table borders', self::TABLE_EDGES);
         $this->sides($block['cellPadding'] ?? null, "{$path}.cellPadding", 'table cellPadding');
+        $this->keepNext($block, $path);
         $width = $block['width'] ?? null;
         if ($width !== null && (! (is_int($width) || is_float($width)) || $width <= 0 || $width > 100)) {
             $this->error("{$path}.width", 'table width must be a percentage of the text column, above 0 and at most 100');
@@ -339,6 +465,7 @@ final class Validator
         if (isset($block['language']) && ! is_string($block['language'])) {
             $this->error("{$path}.language", 'code language must be a string when present');
         }
+        $this->keepNext($block, $path);
     }
 
     /** @param array<string, mixed> $block */
@@ -375,6 +502,7 @@ final class Validator
         if (isset($block['alt']) && ! is_string($block['alt'])) {
             $this->error("{$path}.alt", 'alt must be a string when present');
         }
+        $this->keepNext($block, $path);
     }
 
     private function runs(mixed $runs, string $path): void
@@ -392,7 +520,12 @@ final class Validator
                 continue;
             }
             if (! is_string($run['text'] ?? null)) {
-                $this->error("{$runPath}.text", 'run requires a string "text"');
+                $this->error("{$runPath}.text", array_key_exists('footnote', $run)
+                    ? 'a footnote run requires "text": "" (marks are numbered for you)'
+                    : 'run requires a string "text"');
+            }
+            if (array_key_exists('footnote', $run)) {
+                $this->footnote($run, $runPath);
             }
             foreach (Schema::RUN_FLAGS as $flag) {
                 if (isset($run[$flag]) && ! is_bool($run[$flag])) {
@@ -410,6 +543,45 @@ final class Validator
             $this->size($run['size'] ?? null, "{$runPath}.size");
             $this->number($run['letterSpacing'] ?? null, "{$runPath}.letterSpacing", 'run letterSpacing');
         }
+    }
+
+    /**
+     * A footnote run, last-word's rules: in the body only, its `text` "", its
+     * blocks a non-empty list of the body's less what a footnote cannot hold.
+     *
+     * @param  array<string, mixed>  $run
+     */
+    private function footnote(array $run, string $runPath): void
+    {
+        $at = "{$runPath}.footnote";
+        if ($this->context === 'band') {
+            $this->error($at, 'a header or footer cannot hold a footnote');
+
+            return;
+        }
+        if ($this->context === 'footnote') {
+            $this->error($at, 'a footnote cannot hold a footnote');
+
+            return;
+        }
+        if (is_string($run['text'] ?? null) && $run['text'] !== '') {
+            $this->error("{$runPath}.text", 'a footnote run\'s text must be "": marks are numbered for you. Put the text it follows in the run before it');
+        }
+        $note = $run['footnote'];
+        if (! is_array($note) || ($note !== [] && array_is_list($note))) {
+            $this->error($at, 'footnote must be an object: {"blocks": [{"type": "paragraph", "runs": [{"text": "..."}]}]}');
+
+            return;
+        }
+        $blocks = $note['blocks'] ?? null;
+        if (! is_array($blocks) || ! array_is_list($blocks) || $blocks === []) {
+            $this->error("{$at}.blocks", 'footnote requires "blocks": a non-empty list of blocks, e.g. [{"type": "paragraph", "runs": [{"text": "Source: ..."}]}]');
+
+            return;
+        }
+        [$outer, $this->context] = [$this->context, 'footnote'];
+        $this->blocks($blocks, "{$at}.blocks", 1);
+        $this->context = $outer;
     }
 
     // ------------------------------------------------------------------

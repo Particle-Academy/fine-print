@@ -281,6 +281,19 @@ Agent::guide();                   // the agent guide (agent-guide/building-pdfs.
   size, letter spacing, font, and links.
 - **Layout:** line wrapping and justification with real font metrics; headings
   kept with what follows; no single line left at the foot or head of a page.
+- **Mixed page shapes:** a top-level `pageBreak` takes `page`, the page
+  object's own keys less `background`: `['type' => 'pageBreak', 'page' =>
+  ['orientation' => 'landscape', 'margins' => ['left' => 28.8, 'right' =>
+  28.8]]]`. Each stretch is composed and paginated at its own size. Pages keep
+  every setting until another break names a change. `keepNext` works on tables,
+  images, code and rules, so a chart keeps its caption.
+- **Bands:** one line or `blocks`, including a logo or a one-row table;
+  `firstHeader`, `firstFooter`, `evenHeader`, `evenFooter`; `margins.header` and
+  `.footer`. Live tokens: `{page}`, `{pages}`, `{section}`, `{sectionpages}`,
+  `{title}`, `{author}`, in a table cell too. A band spans its page's text column.
+- **Footnotes:** a run `['text' => '', 'footnote' => ['blocks' => [...]]]` draws
+  a mark, and the note at the foot of that page, with room reserved.
+- **Warnings:** `Agent::write` returns `warnings`: whatever it could not honour.
 - **Page decoration:** `page.background` paints a colour full-bleed, and
   `page.border` draws a frame inset from the page edge (single, double,
   dashed or dotted), on every page under all content and independent of how

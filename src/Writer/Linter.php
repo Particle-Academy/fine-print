@@ -66,6 +66,15 @@ final class Linter
         }
         $this->bands($doc, $findings);
         $this->placeholders($doc['blocks'] ?? [], 'blocks', $findings);
+        foreach (Schema::stretches($doc) as $stretch) {
+            foreach (Schema::PAGE_BANDS as $key) {
+                $band = $stretch['doc']['page'][$key] ?? null;
+                if (is_array($band)) {
+                    $origin = $stretch['origins'][$key] ?? "page.{$key}";
+                    $this->placeholders($band['blocks'] ?? null, "{$origin}.blocks", $findings);
+                }
+            }
+        }
 
         $read = Agent::read($out['bytes'], ['policy' => 'flag', 'threshold' => 'low']);
         foreach ($read['guard']['findings'] ?? [] as $g) {
@@ -95,10 +104,12 @@ final class Linter
     /** @param array<string, mixed> $doc */
     private function hasPageNumbers(array $doc): bool
     {
-        foreach (['header', 'footer'] as $kind) {
-            foreach (['left', 'center', 'right'] as $slot) {
-                if (str_contains((string) ($doc['page'][$kind][$slot] ?? ''), '{page}')) {
-                    return true;
+        foreach (Schema::stretches($doc) as $stretch) {
+            foreach (Schema::PAGE_BANDS as $key) {
+                foreach (Schema::bandTexts($stretch['doc']['page'][$key] ?? null) as $text) {
+                    if (str_contains($text, '{page}')) {
+                        return true;
+                    }
                 }
             }
         }
@@ -112,25 +123,38 @@ final class Linter
      */
     private function bands(array $doc, array &$findings): void
     {
-        $m = Schema::margins($doc);
-        foreach (['header' => 'top', 'footer' => 'bottom'] as $kind => $side) {
-            $band = $doc['page'][$kind] ?? null;
-            if (! is_array($band)) {
-                continue;
+        foreach (Schema::stretches($doc) as $stretch) {
+            $view = $stretch['doc'];
+            $m = Schema::margins($view);
+            // A blocks band moves the body and so cannot run into it. A one-line
+            // band does not, by design, which is why this finding exists.
+            foreach (['header' => 'top', 'footer' => 'bottom', 'firstHeader' => 'top', 'firstFooter' => 'bottom', 'evenHeader' => 'top', 'evenFooter' => 'bottom'] as $key => $side) {
+                $band = $view['page'][$key] ?? null;
+                if (! is_array($band) || is_array($band['blocks'] ?? null)) {
+                    continue;
+                }
+                $kind = $side === 'top' ? 'header' : 'footer';
+                $lines = 1;
+                foreach (['left', 'center', 'right'] as $slot) {
+                    if (is_string($band[$slot] ?? null)) {
+                        $lines = max($lines, substr_count($band[$slot], "\n") + 1);
+                    }
+                }
+                $needs = $m[$kind] + $lines * (float) ($band['size'] ?? 9) * 1.2 + 4;
+                if ($m[$side] < $needs) {
+                    $findings[] = ['rule' => 'band-overlap', 'severity' => 'warning', 'path' => $stretch['origins'][$key] ?? "page.{$key}",
+                        'message' => sprintf('the %s sits %spt from the page edge and needs a %s margin of at least %dpt, or it runs into the text', $kind, Syntax::num($m[$kind]), $side, (int) ceil($needs))];
+                }
             }
-            $needs = 36 + (float) ($band['size'] ?? 9) * 1.2 + 4;
-            if ($m[$side] < $needs) {
-                $findings[] = ['rule' => 'band-overlap', 'severity' => 'warning', 'path' => "page.{$kind}",
-                    'message' => sprintf('the %s sits 36pt from the page edge and needs a %s margin of at least %dpt, or it runs into the text', $kind, $side, (int) ceil($needs))];
-            }
-        }
-        $frame = Schema::pageFrame($doc);
-        if ($frame !== null) {
-            $reach = $frame['inset'] + $frame['width'];
-            $tight = array_keys(array_filter($m, fn (float $v) => $v < $reach));
-            if ($tight !== []) {
-                $findings[] = ['rule' => 'frame-overlap', 'severity' => 'warning', 'path' => 'page.border',
-                    'message' => sprintf('the page border reaches %spt from the edge, inside the %s margin, so text can run over it; make every margin at least %spt', Syntax::num($reach), implode('/', $tight), Syntax::num($reach))];
+            $frame = Schema::pageFrame($view);
+            if ($frame !== null) {
+                $reach = $frame['inset'] + $frame['width'];
+                $sides = array_intersect_key($m, array_flip(['top', 'right', 'bottom', 'left']));
+                $tight = array_keys(array_filter($sides, fn (float $v) => $v < $reach));
+                if ($tight !== []) {
+                    $findings[] = ['rule' => 'frame-overlap', 'severity' => 'warning', 'path' => 'page.border',
+                        'message' => sprintf('the page border reaches %spt from the edge, inside the %s margin, so text can run over it; make every margin at least %spt', Syntax::num($reach), implode('/', $tight), Syntax::num($reach))];
+                }
             }
         }
     }
@@ -179,6 +203,9 @@ final class Linter
         foreach (is_array($runs) ? $runs : [] as $i => $run) {
             if (is_array($run) && is_string($run['text'] ?? null) && ($run['code'] ?? false) !== true) {
                 $this->check($run['text'], "{$path}[{$i}]", $findings);
+            }
+            if (is_array($run) && is_array($run['footnote'] ?? null)) {
+                $this->placeholders($run['footnote']['blocks'] ?? null, "{$path}[{$i}].footnote.blocks", $findings);
             }
         }
     }

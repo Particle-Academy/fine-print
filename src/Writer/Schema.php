@@ -36,6 +36,34 @@ final class Schema
     /** Points from the page edge to the outside of a page frame, by default. */
     public const PAGE_FRAME_INSET = 24.0;
 
+    /** What a page margin is when the document does not say: one inch a side. */
+    public const PAGE_MARGIN_DEFAULT = 72.0;
+
+    /** Points from the page edge to the header, and to the footer, when the document does not say. */
+    public const PAGE_BAND_DISTANCE_DEFAULT = 36.0;
+
+    /** The page's running bands, in the order the schema lists them. */
+    public const PAGE_BANDS = ['header', 'footer', 'firstHeader', 'firstFooter', 'evenHeader', 'evenFooter'];
+
+    /**
+     * Every key of a page object. On a break all of them but `background` are
+     * allowed (Word has one page colour per document).
+     */
+    public const PAGE_KEYS = ['size', 'orientation', 'margins', 'header', 'footer', 'firstHeader', 'firstFooter', 'evenHeader', 'evenFooter', 'background', 'border'];
+
+    /** Block types a band refuses, at any depth. */
+    public const BAND_REFUSED_TYPES = ['chart', 'pageBreak', 'portable'];
+
+    /** Block types a footnote refuses, at any depth. */
+    public const FOOTNOTE_REFUSED_TYPES = ['chart', 'pageBreak', 'portable'];
+
+    /**
+     * The token grammar of a band, last-word's `Schema::FIELD_TOKEN`: lower-case
+     * names, exact, and `{date}` / `{time}` may take `:FORMAT`. Anything else in
+     * braces is literal text. {@see fields()} says which ones a PDF resolves.
+     */
+    public const FIELD_TOKEN = '/\{(?:(page|pages|section|sectionpages|author|title|filename)|(date|time)(?::([^{}"\\\\]+))?)\}/';
+
     /** Boolean run flags (all optional). */
     public const RUN_FLAGS = ['bold', 'italic', 'underline', 'strike', 'code', 'smallCaps'];
 
@@ -88,7 +116,7 @@ final class Schema
             'description' => 'Box spacing in points. Anything omitted is left alone.',
             'properties' => array_fill_keys(['top', 'right', 'bottom', 'left'], $points),
         ];
-        $bandSlot = ['type' => 'string', 'description' => 'Text. `{page}` is the current page number and `{pages}` the page count: "Page {page} of {pages}".'];
+        $bandSlot = ['type' => 'string', 'description' => 'Text with live tokens: {page} and {pages} ("Page {page} of {pages}", the document\'s own numbering and total), {section} (which stretch of pages this is, counting one per pageBreak with a page) and {sectionpages} (that stretch\'s page count), {title} and {author} (meta.author). A PDF has no live date: {date}, {time} and {filename} are written as literal text and reported in warnings. Anything else in braces is literal text.'];
         $band = [
             'type' => 'object',
             'additionalProperties' => false,
@@ -99,6 +127,32 @@ final class Schema
                 'right' => $bandSlot,
                 'size' => ['type' => 'number', 'minimum' => self::MIN_TEXT_SIZE, 'description' => 'Points; 9 by default.'],
                 'color' => ['type' => 'string', 'pattern' => '^#[0-9A-Fa-f]{6}$', 'description' => 'Text colour; #6B7280 by default.'],
+            ],
+        ];
+        $bandRef = fn (string $description): array => ['oneOf' => [['$ref' => '#/$defs/band'], ['$ref' => '#/$defs/blocksBand']], 'description' => $description];
+        $keepNext = ['type' => 'boolean', 'description' => 'Keep on the same page as the block after it: a chart with its caption, a table with the note under it.'];
+        // The page object. A break takes the same keys, less `background`.
+        $pageProps = [
+            'size' => ['enum' => array_keys(self::PAGE_SIZES)],
+            'orientation' => ['enum' => ['portrait', 'landscape']],
+            'margins' => ['$ref' => '#/$defs/pageMargins'],
+            'header' => $bandRef('A running header on every page: a one-line band, or blocks (a letterhead with a logo). With a firstHeader, every page but the first; with an evenHeader, the odd pages.'),
+            'footer' => $bandRef('A running footer on every page: where a multi-page document carries its page numbers. With a firstFooter, every page but the first; with an evenFooter, the odd pages.'),
+            'firstHeader' => $bandRef('The header of the FIRST page only, in place of header there. {"blocks": []} leaves that page with no header. On a pageBreak it means the first page after that break. Never inherited by a later break.'),
+            'firstFooter' => $bandRef('The footer of the first page only, in place of footer there. {"blocks": []} leaves that page with no footer. On a pageBreak it means the first page after that break. Never inherited by a later break.'),
+            'evenHeader' => $bandRef('The header of even pages; header is then the odd pages\'. Follows the page number, which runs through the whole document and does not restart at a break.'),
+            'evenFooter' => $bandRef('The footer of even pages; footer is then the odd pages\'. Follows the page number, which runs through the whole document and does not restart at a break.'),
+            'background' => $hex + ['description' => 'Page colour, painted full-bleed on every page under everything else, e.g. "#FDFAF3". White (none) by default. One per document: refused on a pageBreak.'],
+            'border' => [
+                'type' => 'object',
+                'additionalProperties' => false,
+                'description' => 'A frame around every page, measured from the page edge, so it is the same whatever the page holds (a certificate border). e.g. {"style": "double", "width": 6, "color": "#B08D57", "inset": 18}. Margins are separate: keep them wider than inset + width so text clears the frame.',
+                'properties' => [
+                    'style' => ['enum' => self::BORDER_STYLES, 'description' => 'single by default; double draws two rules with a gap, each a third of the width; none draws nothing.'],
+                    'width' => ['type' => 'number', 'exclusiveMinimum' => 0, 'description' => 'Points, the whole frame (both rules and the gap, for double). 0.5 by default.'],
+                    'color' => $hex + ['description' => 'Black by default.'],
+                    'inset' => ['type' => 'number', 'minimum' => 0, 'description' => 'Points from the page edge to the outside of the frame. '.self::PAGE_FRAME_INSET.' by default.'],
+                ],
             ],
         ];
 
@@ -132,6 +186,7 @@ final class Schema
                 'size' => ['type' => 'number', 'minimum' => self::MIN_TEXT_SIZE, 'maximum' => self::MAX_TEXT_SIZE, 'description' => 'Font size in points, at least 1.'],
                 'font' => ['type' => 'string', 'description' => 'Font family: Helvetica, Times or Courier (and their usual aliases, such as Arial, Times New Roman, Courier New), or a family the host registered.'],
                 'letterSpacing' => ['type' => 'number', 'description' => 'Tracking in points; may be negative.'],
+                'footnote' => ['$ref' => '#/$defs/footnote'],
             ],
         ];
         $runs = ['type' => 'array', 'items' => ['$ref' => '#/$defs/run']];
@@ -189,6 +244,7 @@ final class Schema
                     'align' => ['enum' => ['left', 'center', 'right']],
                     'borders' => ['$ref' => '#/$defs/tableBorders'],
                     'cellPadding' => ['$ref' => '#/$defs/boxSides'],
+                    'keepNext' => $keepNext,
                     'rows' => [
                         'type' => 'array',
                         'items' => [
@@ -226,8 +282,9 @@ final class Schema
                 'required' => ['type', 'text'],
                 'properties' => [
                     'type' => ['const' => 'code'],
-                    'language' => ['type' => 'string'],
+                    'language' => ['type' => 'string', 'description' => 'Not drawn in a PDF yet (warnings say so).'],
                     'text' => ['type' => 'string'],
+                    'keepNext' => $keepNext,
                 ],
             ],
             'quote' => [
@@ -246,11 +303,24 @@ final class Schema
                     'src' => ['type' => 'string', 'pattern' => '^data:image/(png|jpe?g);base64,', 'description' => 'PNG or JPEG data URL.'],
                     'widthPx' => ['type' => 'number', 'exclusiveMinimum' => 0, 'description' => 'Width in px at 96 dpi; capped at the text column.'],
                     'heightPx' => ['type' => 'number', 'exclusiveMinimum' => 0, 'description' => 'Height in px at 96 dpi. With only one of the two, the other keeps the aspect ratio.'],
-                    'alt' => ['type' => 'string'],
+                    'alt' => ['type' => 'string', 'description' => 'Not carried by a PDF from this writer yet (warnings say so).'],
+                    'keepNext' => $keepNext,
                 ],
             ],
-            'pageBreak' => ['type' => 'object', 'required' => ['type'], 'properties' => ['type' => ['const' => 'pageBreak']]],
-            'hr' => ['type' => 'object', 'required' => ['type'], 'properties' => ['type' => ['const' => 'hr']]],
+            'pageBreak' => [
+                'type' => 'object',
+                'required' => ['type'],
+                'properties' => [
+                    'type' => ['const' => 'pageBreak'],
+                    'page' => [
+                        'type' => 'object',
+                        'additionalProperties' => false,
+                        'description' => 'Change the page from here on: {"type": "pageBreak", "page": {"orientation": "landscape", "margins": {"left": 28.8, "right": 28.8}}}. Pages after the break keep every setting until another break names a change; portrait does not come back by itself. margins merge side by side, every other key is replaced whole. {} starts a new stretch with nothing changed. Only on a top-level break, not one in a quote or a table cell.',
+                        'properties' => array_diff_key($pageProps, ['background' => true]),
+                    ],
+                ],
+            ],
+            'hr' => ['type' => 'object', 'required' => ['type'], 'properties' => ['type' => ['const' => 'hr'], 'keepNext' => $keepNext]],
         ];
 
         return [
@@ -260,31 +330,21 @@ final class Schema
             'type' => 'object',
             'required' => ['blocks'],
             'properties' => [
-                'title' => ['type' => 'string', 'description' => 'The document title, stored as PDF metadata (not drawn).'],
+                'title' => ['type' => 'string', 'description' => 'The document title, stored as PDF metadata and shown by a {title} token in a band. Not drawn in the body; write a heading for that.'],
+                'meta' => [
+                    'type' => 'object',
+                    'additionalProperties' => false,
+                    'description' => 'Document properties beyond the title (which is the top-level `title`).',
+                    'properties' => [
+                        'author' => ['type' => 'string', 'description' => 'The PDF\'s Author, and what an {author} token in a band shows.'],
+                    ],
+                ],
                 'blocks' => ['type' => 'array', 'items' => $blockRef],
                 'page' => [
                     'type' => 'object',
                     'additionalProperties' => false,
-                    'description' => 'Page geometry. One-inch margins by default.',
-                    'properties' => [
-                        'size' => ['enum' => array_keys(self::PAGE_SIZES)],
-                        'orientation' => ['enum' => ['portrait', 'landscape']],
-                        'margins' => ['$ref' => '#/$defs/boxSides'],
-                        'header' => ['$ref' => '#/$defs/band', 'description' => 'A running header on every page.'],
-                        'footer' => ['$ref' => '#/$defs/band', 'description' => 'A running footer on every page: where a multi-page document carries its page numbers.'],
-                        'background' => $hex + ['description' => 'Page colour, painted full-bleed on every page under everything else, e.g. "#FDFAF3". White (none) by default.'],
-                        'border' => [
-                            'type' => 'object',
-                            'additionalProperties' => false,
-                            'description' => 'A frame around every page, measured from the page edge, so it is the same whatever the page holds (a certificate border). e.g. {"style": "double", "width": 6, "color": "#B08D57", "inset": 18}. Margins are separate: keep them wider than inset + width so text clears the frame.',
-                            'properties' => [
-                                'style' => ['enum' => self::BORDER_STYLES, 'description' => 'single by default; double draws two rules with a gap, each a third of the width; none draws nothing.'],
-                                'width' => ['type' => 'number', 'exclusiveMinimum' => 0, 'description' => 'Points, the whole frame (both rules and the gap, for double). 0.5 by default.'],
-                                'color' => $hex + ['description' => 'Black by default.'],
-                                'inset' => ['type' => 'number', 'minimum' => 0, 'description' => 'Points from the page edge to the outside of the frame. '.self::PAGE_FRAME_INSET.' by default.'],
-                            ],
-                        ],
-                    ],
+                    'description' => 'Page geometry. One-inch margins by default. Mixed page shapes: a pageBreak with its own `page`.',
+                    'properties' => $pageProps,
                 ],
                 'defaultFont' => ['type' => 'string', 'description' => 'Font every run inherits unless it names its own. Helvetica by default.'],
                 'defaultSize' => ['type' => 'number', 'minimum' => self::MIN_TEXT_SIZE, 'maximum' => self::MAX_TEXT_SIZE, 'description' => 'Size in points every run inherits; 11 by default.'],
@@ -296,7 +356,50 @@ final class Schema
                 'boxBorders' => $boxBorders,
                 'tableBorders' => $tableBorders,
                 'boxSides' => $boxSides,
+                'pageMargins' => [
+                    'type' => 'object',
+                    'additionalProperties' => false,
+                    'description' => 'Page margins in points, 72 (one inch) each side by default, and the header and footer DISTANCES: how far the header sits from the top edge of the page and the footer from the bottom edge, 36 by default. A blocks band taller than the margin leaves room for moves the body down (or up), on the pages that draw it; a one-line band never does.',
+                    'properties' => [
+                        'top' => $points,
+                        'right' => $points,
+                        'bottom' => $points,
+                        'left' => $points,
+                        'header' => ['type' => 'number', 'minimum' => 0, 'description' => 'Points from the top edge of the page to the top of the header. 36 by default.'],
+                        'footer' => ['type' => 'number', 'minimum' => 0, 'description' => 'Points from the bottom edge of the page to the bottom of the footer. 36 by default.'],
+                    ],
+                ],
+                'footnote' => [
+                    'type' => 'object',
+                    'required' => ['blocks'],
+                    'additionalProperties' => false,
+                    'description' => 'A footnote, carried by a run whose text is "" and which sits where the reference mark goes: {"text": "", "footnote": {"blocks": [{"type": "paragraph", "runs": [{"text": "Audited figures, FY2026."}]}]}}. Marks number 1, 2, 3 in reading order, and each note is set at the foot of the page that holds its mark, at 10pt. The blocks are the body vocabulary less pageBreak, with no footnote inside a footnote. Not in a header or footer.',
+                    'properties' => [
+                        'blocks' => [
+                            'type' => 'array',
+                            'items' => ['allOf' => [
+                                ['$ref' => '#/$defs/block'],
+                                ['not' => ['properties' => ['type' => ['enum' => ['pageBreak']]], 'required' => ['type']]],
+                            ]],
+                        ],
+                    ],
+                ],
                 'band' => $band,
+                'blocksBand' => [
+                    'type' => 'object',
+                    'required' => ['blocks'],
+                    'additionalProperties' => false,
+                    'description' => 'A running header or footer that holds blocks, the body\'s own vocabulary less pageBreak at any depth, for what one line cannot: a logo, a table, a line with a rule under it. e.g. {"blocks": [{"type": "image", "src": "data:image/png;base64,...", "widthPx": 96}, {"type": "paragraph", "align": "right", "runs": [{"text": "Page {page}", "size": 8}]}]}. Tokens in run text are live, in a table cell too. Set at the page\'s own width, between its left and right margins. Never mixed with left/center/right/size/color.',
+                    'properties' => [
+                        'blocks' => [
+                            'type' => 'array',
+                            'items' => ['allOf' => [
+                                ['$ref' => '#/$defs/block'],
+                                ['not' => ['properties' => ['type' => ['enum' => ['pageBreak']]], 'required' => ['type']]],
+                            ]],
+                        ],
+                    ],
+                ],
                 'block' => ['oneOf' => array_values($blocks)],
                 'portable' => self::portableSchema(),
                 'portableRun' => [
@@ -461,10 +564,11 @@ final class Schema
     }
 
     /**
-     * Margins in points, one inch where unset.
+     * Margins in points, one inch where unset, plus the header and footer
+     * distances, half an inch where unset.
      *
      * @param  array<string, mixed>  $doc
-     * @return array{top: float, right: float, bottom: float, left: float}
+     * @return array{top: float, right: float, bottom: float, left: float, header: float, footer: float}
      */
     public static function margins(array $doc): array
     {
@@ -472,9 +576,170 @@ final class Schema
         $out = [];
         foreach (['top', 'right', 'bottom', 'left'] as $side) {
             $v = $m[$side] ?? null;
-            $out[$side] = (is_int($v) || is_float($v)) && $v >= 0 ? (float) $v : 72.0;
+            $out[$side] = (is_int($v) || is_float($v)) && $v >= 0 ? (float) $v : self::PAGE_MARGIN_DEFAULT;
+        }
+        foreach (['header', 'footer'] as $distance) {
+            $v = $m[$distance] ?? null;
+            $out[$distance] = (is_int($v) || is_float($v)) && $v >= 0 ? (float) $v : self::PAGE_BAND_DISTANCE_DEFAULT;
         }
 
         return $out;
+    }
+
+    /**
+     * The document split at its top-level `pageBreak.page`s: each stretch's
+     * blocks (keys kept, so a finding's path still names the document's own
+     * index), the document as that stretch sees it, and where each of its bands
+     * was set. Never fails on a malformed document; the validator is what
+     * refuses one. A document with no such break is one stretch whose page is
+     * the document's own, untouched.
+     *
+     * The rules, the owner's: pages after a break keep every setting until
+     * another break names a change. `margins` merge side by side and every
+     * other key is replaced whole. `firstHeader` and `firstFooter` are never
+     * inherited: at the top level they mean page 1, on a break the first page
+     * after it. A null names nothing.
+     *
+     * @param  array<string, mixed>  $doc
+     * @return list<array{doc: array<string, mixed>, blocks: array<int, mixed>, break: ?int, origins: array<string, string>}>
+     */
+    public static function stretches(array $doc): array
+    {
+        $blocks = is_array($doc['blocks'] ?? null) ? $doc['blocks'] : [];
+        $page = is_array($doc['page'] ?? null) ? $doc['page'] : null;
+        $origins = array_combine(self::PAGE_BANDS, array_map(fn (string $k) => "page.{$k}", self::PAGE_BANDS));
+
+        $out = [];
+        $current = [];
+        $at = null;
+        foreach ($blocks as $i => $block) {
+            if (! is_array($block) || ($block['type'] ?? null) !== 'pageBreak' || ! self::isPageObject($block['page'] ?? null)) {
+                $current[$i] = $block;
+
+                continue;
+            }
+            $out[] = self::stretch($doc, $page, $current, $at, $origins);
+            $current = [];
+            $at = is_int($i) ? $i : null;
+            unset($origins['firstHeader'], $origins['firstFooter']);
+            $page = self::mergePage($page ?? [], $block['page']);
+            foreach (self::PAGE_BANDS as $key) {
+                if (isset($block['page'][$key])) {
+                    $origins[$key] = "blocks[{$i}].page.{$key}";
+                }
+            }
+        }
+        $out[] = self::stretch($doc, $page, $current, $at, $origins);
+
+        return $out;
+    }
+
+    /** Whether a break's `page` is a page object: `{}` decodes to `[]`, and a non-empty list is not one. */
+    public static function isPageObject(mixed $page): bool
+    {
+        return is_array($page) && ($page === [] || ! array_is_list($page));
+    }
+
+    /**
+     * @param  array<string, mixed>  $page
+     * @param  array<string, mixed>  $change
+     * @return array<string, mixed>
+     */
+    private static function mergePage(array $page, array $change): array
+    {
+        unset($page['firstHeader'], $page['firstFooter']);
+        foreach ($change as $key => $value) {
+            if ($value === null || $key === 'background') {
+                continue;
+            }
+            if ($key === 'margins' && is_array($value) && is_array($page['margins'] ?? null)) {
+                $page['margins'] = array_replace($page['margins'], array_filter($value, fn ($v) => $v !== null));
+
+                continue;
+            }
+            $page[$key] = $value;
+        }
+
+        return $page;
+    }
+
+    /**
+     * @param  array<string, mixed>  $doc
+     * @param  array<string, mixed>|null  $page
+     * @param  array<int, mixed>  $blocks
+     * @param  array<string, string>  $origins
+     * @return array{doc: array<string, mixed>, blocks: array<int, mixed>, break: ?int, origins: array<string, string>}
+     */
+    private static function stretch(array $doc, ?array $page, array $blocks, ?int $break, array $origins): array
+    {
+        $view = $doc;
+        unset($view['blocks']);
+        if ($page !== null) {
+            $view['page'] = $page;
+        }
+
+        return ['doc' => $view, 'blocks' => $blocks, 'break' => $break, 'origins' => $origins];
+    }
+
+    /**
+     * Whether a band says anything: a variant that is present and empty blanks
+     * its page rather than falling back, as `bands.ts` has it.
+     */
+    public static function bandHasContent(mixed $band): bool
+    {
+        if (! is_array($band)) {
+            return false;
+        }
+        if (is_array($band['blocks'] ?? null)) {
+            return $band['blocks'] !== [];
+        }
+        foreach (['left', 'center', 'right'] as $slot) {
+            if (is_string($band[$slot] ?? null) && $band[$slot] !== '') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Every text a token could sit in: a one-line band's slots, a blocks band's
+     * run text at any depth.
+     *
+     * @return list<string>
+     */
+    public static function bandTexts(mixed $band): array
+    {
+        if (! is_array($band)) {
+            return [];
+        }
+        $out = [];
+        foreach (['left', 'center', 'right'] as $slot) {
+            if (is_string($band[$slot] ?? null)) {
+                $out[] = $band[$slot];
+            }
+        }
+        self::collectRunText($band['blocks'] ?? null, $out, 0);
+
+        return $out;
+    }
+
+    /** @param list<string> $out */
+    private static function collectRunText(mixed $node, array &$out, int $depth): void
+    {
+        if (! is_array($node) || $depth > 64) {
+            return;
+        }
+        foreach ($node as $key => $value) {
+            if ($key === 'runs' && is_array($value)) {
+                foreach ($value as $run) {
+                    if (is_array($run) && is_string($run['text'] ?? null)) {
+                        $out[] = $run['text'];
+                    }
+                }
+            } elseif ($key !== 'src' && is_array($value)) {
+                self::collectRunText($value, $out, $depth + 1);
+            }
+        }
     }
 }

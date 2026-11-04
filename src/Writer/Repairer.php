@@ -33,11 +33,15 @@ final class Repairer
         'header', 'language', 'widthPx', 'heightPx', 'alt', 'bold', 'italic', 'underline', 'strike', 'code',
         'smallCaps', 'link', 'color', 'highlight', 'size', 'font', 'letterSpacing', 'title', 'defaultFont',
         'defaultSize', 'page', 'margins', 'orientation', 'footer', 'left', 'right', 'center', 'top', 'bottom',
-        'insideH', 'insideV', 'style', 'background', 'border', 'inset',
+        'insideH', 'insideV', 'style', 'background', 'border', 'inset', 'firstHeader', 'firstFooter', 'evenHeader', 'evenFooter',
+        'meta', 'author',
     ];
 
     /** @var list<array{path: string, message: string}> */
     private array $notes = [];
+
+    /** 'body', 'band' or 'footnote': where blocks are being repaired, and so what may stay. */
+    private string $context = 'body';
 
     public function __construct(private readonly int $maxImagePixels = Image::MAX_PIXELS) {}
 
@@ -48,7 +52,18 @@ final class Repairer
     public function repair(array $doc): array
     {
         $this->notes = [];
+        $this->context = 'body';
 
+        if (is_array($doc['meta'] ?? null) && array_key_exists('title', $doc['meta'])) {
+            // Before the title check below, so a moved one is judged like any other.
+            if (! array_key_exists('title', $doc) && is_string($doc['meta']['title'])) {
+                $doc['title'] = $doc['meta']['title'];
+                $this->note('meta.title', 'moved meta.title to the top-level "title"');
+            } else {
+                $this->note('meta.title', 'dropped meta.title: the document title is the top-level "title"');
+            }
+            unset($doc['meta']['title']);
+        }
         if (array_key_exists('title', $doc) && ! is_string($doc['title'])) {
             if (is_scalar($doc['title'])) {
                 $doc['title'] = (string) $doc['title'];
@@ -66,6 +81,9 @@ final class Repairer
             $this->note('blocks', 'defaulted missing/invalid "blocks" to []');
         }
         $doc['blocks'] = $this->blocks($doc['blocks'], 'blocks');
+        if (is_array($doc['page'] ?? null)) {
+            $doc['page'] = $this->pageSettings($doc['page'], 'page');
+        }
 
         // Whatever is still wrong: remove optional properties, one pass.
         $validator = new Validator($this->maxImagePixels);
@@ -76,6 +94,69 @@ final class Repairer
         }
 
         return ['doc' => $doc, 'notes' => $this->notes];
+    }
+
+    /**
+     * A page object's bands: a blocks band keeps its blocks, repaired under a
+     * band's rules, and loses any one-line keys mixed in with them. Everything
+     * else is left to the validation pass, which removes what is still invalid.
+     *
+     * @param  array<string, mixed>  $page
+     * @return array<string, mixed>
+     */
+    private function pageSettings(array $page, string $path): array
+    {
+        foreach (Schema::PAGE_BANDS as $kind) {
+            $band = $page[$kind] ?? null;
+            if (! is_array($band) || ! is_array($band['blocks'] ?? null) || ! array_is_list($band['blocks'])) {
+                continue;
+            }
+            $mixed = array_values(array_intersect(['left', 'center', 'right', 'size', 'color'], array_keys($band)));
+            if ($mixed !== []) {
+                $this->note("{$path}.{$kind}", 'removed '.implode(', ', $mixed).': a band is either one line or blocks, and this one has blocks');
+                $band = ['blocks' => $band['blocks']];
+            }
+            [$outer, $this->context] = [$this->context, 'band'];
+            $band['blocks'] = $this->blocks($band['blocks'], "{$path}.{$kind}.blocks");
+            $this->context = $outer;
+            $page[$kind] = $band;
+        }
+
+        return $page;
+    }
+
+    /**
+     * A page break. `page` stays, and page keys typed on the break itself move
+     * into it: rewriting a break to bare `{type}` would silently undo the
+     * orientation change and still report success.
+     *
+     * @param  array<string, mixed>  $block
+     * @return array<string, mixed>
+     */
+    private function pageBreak(array $block, string $path): array
+    {
+        $page = $block['page'] ?? null;
+        $moved = [];
+        foreach (Schema::PAGE_KEYS as $key) {
+            if (! array_key_exists($key, $block)) {
+                continue;
+            }
+            if (is_array($page) && array_key_exists($key, $page)) {
+                $this->note("{$path}.{$key}", "dropped {$key} from the break: its page already says what it is");
+
+                continue;
+            }
+            $moved[$key] = $block[$key];
+            $this->note("{$path}.{$key}", "moved {$key} into the break's \"page\": a break's page settings go there");
+        }
+        if ($moved !== []) {
+            $page = is_array($page) ? $page + $moved : $moved;
+        }
+        if ($page === null) {
+            return ['type' => 'pageBreak'];
+        }
+
+        return ['type' => 'pageBreak', 'page' => is_array($page) ? $this->pageSettings($page, "{$path}.page") : $page];
     }
 
     /**
@@ -119,6 +200,12 @@ final class Repairer
                 return null;
             }
         }
+        if ($this->context !== 'body' && in_array($type, $this->context === 'band' ? Schema::BAND_REFUSED_TYPES : Schema::FOOTNOTE_REFUSED_TYPES, true)) {
+            $where = $this->context === 'band' ? 'a header or footer' : 'a footnote';
+            $this->note("{$path}.type", "dropped a {$type} block: {$where} cannot hold one");
+
+            return null;
+        }
         if ($type === 'portable') {
             // Content that expanded is already gone; what is left did not
             // validate, and is refused rather than guessed at or dropped.
@@ -143,8 +230,8 @@ final class Repairer
             'code' => $this->code($block, $path),
             'quote' => $this->quote($block, $path),
             'image' => $this->image($block, $path),
-            'pageBreak' => ['type' => 'pageBreak'],
-            'hr' => ['type' => 'hr'],
+            'pageBreak' => $this->pageBreak($block, $path),
+            'hr' => array_key_exists('keepNext', $block) ? ['type' => 'hr', 'keepNext' => $block['keepNext']] : ['type' => 'hr'],
         };
     }
 
@@ -385,6 +472,11 @@ final class Repairer
 
                 continue;
             }
+            if (array_key_exists('footnote', $run)) {
+                array_push($out, ...$this->footnoteRun($run, $runPath));
+
+                continue;
+            }
             if (! is_string($run['text'] ?? null)) {
                 if (is_scalar($run['text'] ?? null)) {
                     $run['text'] = (string) $run['text'];
@@ -410,6 +502,64 @@ final class Repairer
             }
             $out[] = $run;
         }
+
+        return $out;
+    }
+
+    /**
+     * A footnote run, repaired as last-word repairs one: text typed on the mark
+     * moves to a run of its own before it (losing nothing), a missing `text`
+     * becomes "", a bare string or list of blocks is wrapped, and a footnote
+     * where one cannot go (a band, another footnote) is dropped with a note.
+     *
+     * @param  array<string, mixed>  $run
+     * @return list<array<string, mixed>>
+     */
+    private function footnoteRun(array $run, string $path): array
+    {
+        $note = $run['footnote'];
+        unset($run['footnote']);
+        $out = [];
+        if (is_scalar($run['text'] ?? null) && (string) $run['text'] !== '') {
+            $run['text'] = (string) $run['text'];
+            $out[] = $run;
+            $this->note("{$path}.text", 'moved text typed on a footnote mark into a run of its own before it');
+        }
+        if ($this->context !== 'body') {
+            $this->note("{$path}.footnote", $this->context === 'band'
+                ? 'dropped a footnote: a header or footer cannot hold one'
+                : 'dropped a footnote inside a footnote');
+
+            return $out;
+        }
+        if (is_string($note) && $note !== '') {
+            $note = ['blocks' => [['type' => 'paragraph', 'runs' => [['text' => $note]]]]];
+            $this->note("{$path}.footnote", 'coerced a string footnote to {blocks: [paragraph]}');
+        } elseif (is_array($note) && $note !== [] && array_is_list($note)) {
+            $note = ['blocks' => $note];
+            $this->note("{$path}.footnote", 'coerced a list of blocks to {blocks}');
+        }
+        $blocks = is_array($note) ? ($note['blocks'] ?? null) : null;
+        if (is_string($blocks) && $blocks !== '') {
+            $blocks = [['type' => 'paragraph', 'runs' => [['text' => $blocks]]]];
+        }
+        if (! is_array($blocks) || ! array_is_list($blocks)) {
+            $this->note("{$path}.footnote", 'dropped a footnote without blocks');
+
+            return $out;
+        }
+        $this->context = 'footnote';
+        $blocks = $this->blocks($blocks, "{$path}.footnote.blocks");
+        $this->context = 'body';
+        if ($blocks === []) {
+            $this->note("{$path}.footnote", 'dropped a footnote with no blocks left');
+
+            return $out;
+        }
+        if (! array_key_exists('text', $run)) {
+            $this->note("{$path}.text", 'defaulted a footnote run\'s text to ""');
+        }
+        $out[] = ['text' => '', 'footnote' => ['blocks' => $blocks]];
 
         return $out;
     }

@@ -54,6 +54,16 @@ final class ParagraphFlow extends Flowable
         return $this->pad() * 2 + $this->linesHeight(array_slice($this->lines, 0, self::ORPHANS));
     }
 
+    public function notes(): array
+    {
+        $out = [];
+        foreach ($this->lines as $line) {
+            array_push($out, ...$line->notes());
+        }
+
+        return $out;
+    }
+
     public function split(float $avail): ?array
     {
         $total = count($this->lines);

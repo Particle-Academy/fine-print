@@ -246,6 +246,32 @@ dictionary itself; cross-reference streams, objects inside object streams
 `Canvas`) → `PdfWriter` (objects, via `Pdf\PdfFile` and `Pdf\Syntax`).
 `Linter` writes, then reads the result back through `Agent::read()`.
 
+A document is **stretches** of pages (`Schema::stretches()`, split at top-level
+`pageBreak.page`), each composed and paginated at its own size by the one
+`Composer`, which numbers footnotes across all of them. `Layout\PageBands` picks
+each page's bands and gives `Paginator` that page's body; the bands are drawn last,
+once the page count is known.
+
+- **The rules mirror last-word-ui** (`bands.ts`, `geometry.ts`, `footnotes.ts`,
+  `FootnoteView`). The one deliberate difference: a one-line band never moves the
+  body. Moving it would change the bytes of every existing document with a tight
+  margin; `band-overlap` reports it instead.
+- **A band's token values are unknown when it is measured**, so a blocks band's
+  page tokens are measured as `9999` and its height is taken from that. Do not
+  measure with real numbers: the pages do not exist yet.
+- **`FootnoteFlow`s are composed at the column width whatever holds the mark**, and
+  live in `Paginator`, not in the flow. A block only names them (`Flowable::notes()`,
+  from the `TextStyle` of the mark on a `Line`), so a split finds its notes by which
+  lines it took. Never store a note on a `Line`: a repeated table header would then
+  draw it again on the same page.
+- **A footnote mark rises 0.3em and no further.** `Text\Layout` groups a line within
+  half the smaller size, and a higher mark reads back as its own line, BEFORE the
+  sentence. Measured: 0.33 did exactly that, and looked perfect in the PNG.
+- **Text rise is graphics state**, tracked per page like `Tc` (`Canvas::$ts`).
+- **A note must never be lost.** What does not fit carries to the next page, a
+  stretch is not left until its notes are out (they are set at that stretch's width),
+  and what cannot be split and fits on no page is drawn past the margin and reported.
+
 Writer invariants:
 
 - **Nothing active exists to be emitted.** The writer writes a catalog, a page

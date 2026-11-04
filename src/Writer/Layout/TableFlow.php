@@ -49,6 +49,18 @@ final class TableFlow extends Flowable
         return array_sum($this->heights);
     }
 
+    public function notes(): array
+    {
+        $out = [];
+        foreach ($this->rows as $row) {
+            foreach ($row['cells'] as $cell) {
+                array_push($out, ...$cell['content']->notes());
+            }
+        }
+
+        return $out;
+    }
+
     public function minHeight(): float
     {
         $body = $this->bodyGroups();

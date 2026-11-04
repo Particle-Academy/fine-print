@@ -29,8 +29,8 @@ function fpsLists(): array
     return $out;
 }
 
-it('has the five lists the plan names', function (): void {
-    expect(array_keys(fpsLists()))->toBe(['exchange', 'p1-reader-security', 'p2-writer', 'p3a-renderer', 'p3b-text']);
+it('has the lists the plans name', function (): void {
+    expect(array_keys(fpsLists()))->toBe(['exchange', 'p1-reader-security', 'p2-mixed-pages', 'p2-writer', 'p3a-renderer', 'p3b-text']);
 });
 
 it('keeps every case applicable to the current source', function (string $list): void {

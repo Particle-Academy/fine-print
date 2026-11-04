@@ -369,7 +369,10 @@ final class Agent
      *
      * @param  array<string, mixed>  $doc
      * @param  array{fonts?: array<string, string|array<string, string>>, compress?: bool}  $options
-     * @return array{path: string, bytes: int, pages: int}
+     * @return array{path: string, bytes: int, pages: int, warnings: list<array{rule: string, severity: string, path: string, message: string, page?: int}>}
+     *                                                                                 what the writer had to compromise on: a setting it could not honour, a
+     *                                                                                 character it could not draw. Never quotes the document's text. {@see lint()}
+     *                                                                                 reports these too, plus findings about the finished page.
      *
      * @throws SchemaException
      * @throws FontException
@@ -382,7 +385,7 @@ final class Agent
             throw new InvalidArgumentException('Could not write '.$path);
         }
 
-        return ['path' => $path, 'bytes' => strlen($out['bytes']), 'pages' => $out['pages']];
+        return ['path' => $path, 'bytes' => strlen($out['bytes']), 'pages' => $out['pages'], 'warnings' => $out['diagnostics']];
     }
 
     /**

@@ -26,14 +26,18 @@ final class ImageStore
     }
 
     /**
-     * Write every image; returns resource name => object number.
+     * Write the images a page drew; returns resource name => object number.
      *
+     * @param  array<string, true>  $drawn  by resource name
      * @return array<string, int>
      */
-    public function emit(PdfFile $file): array
+    public function emit(PdfFile $file, array $drawn): array
     {
         $out = [];
         foreach ($this->images as $entry) {
+            if (! isset($drawn[$entry['name']])) {
+                continue;
+            }
             $x = $entry['image']->xobject();
             $dict = $x['dict'];
             if ($x['smask'] !== null) {

@@ -34,9 +34,48 @@ Then:
   chart and says so.
 - Runs: `bold`, `italic`, `underline`, `strike`, `code`, `color`, `highlight`,
   `size`, `font`, `letterSpacing`, `link`. `smallCaps` is accepted but not
-  drawn (lint says so).
+  drawn, an image's `alt` is not stored and a code block's `language` draws
+  nothing (lint and `write`'s warnings say so).
 - Page: `size` letter / legal / a4, `orientation`, `margins` (one inch by
-  default), and `header` / `footer` bands with `{page}` and `{pages}`.
+  default, plus `header` and `footer`: how far each band sits from the page
+  edge, 36pt by default), and bands.
+- Bands: `header` / `footer` on every page, `firstHeader` / `firstFooter` on
+  the first page only, `evenHeader` / `evenFooter` on even pages. Each is one
+  line (`{"left": "Q3", "right": "Page {page} of {pages}"}`, 9pt grey unless
+  `size` / `color` say otherwise) or `{"blocks": [...]}`, the body's own blocks
+  less `pageBreak`: a logo, a one-row table holding image, text and page number,
+  a line with an `hr` under it. Run formatting works there. Tokens are live, in
+  a table cell too: `{page}`, `{pages}`, `{section}`, `{sectionpages}`, `{title}`,
+  `{author}` (`meta.author`). `{date}`, `{time}` and `{filename}` are written as
+  literal text and reported (a PDF has no live date). `{"blocks": []}` blanks
+  the band on that page: a cover with no running header. A band spans the text
+  column, between the left and right margins. A blocks band taller than its
+  margin moves the body on the pages that draw it; a one-line band never does,
+  so give it room (lint: `band-overlap`).
+- Mixed page shapes: a top-level `pageBreak` takes `page`, the page object's
+  own keys less `background`:
+  `{"type": "pageBreak", "page": {"orientation": "landscape", "margins": {"left": 28.8, "right": 28.8}}}`.
+  Pages after it keep every setting until another break names a change, so
+  portrait does not come back by itself. `margins` merge side by side; every
+  other key is replaced whole. A landscape stretch inherits the header and
+  footer, laid out at its own width. `firstHeader` / `firstFooter` on a break
+  mean the first page after it and are never inherited. Even bands follow the
+  page number, which runs through the whole document. `{"page": {}}` starts a
+  new stretch with nothing changed. A break always starts a new page, so one at
+  the very start or end of `blocks` makes a blank page: set a landscape first
+  page on the top-level `page`. There is no `sections` key.
+- Keep together: `keepNext: true` on a heading, paragraph, list item, table,
+  image, code block or `hr` keeps it on the page of the block after it, a chart
+  with its caption. A heading has it by default. A one-row table moves whole
+  with no key at all. There is no other keep word, and a block taller than a
+  page still splits.
+- Footnotes: a run `{"text": "", "footnote": {"blocks": [...]}}` where the mark
+  goes. Marks number 1, 2, 3 in reading order, a table cell included, and each
+  note is drawn at the foot of the page holding its mark, with room reserved. A
+  note too long for the page continues on the next (lint: `footnote-continued`).
+  Not in a band, not in a footnote.
+- `Agent::write` returns `warnings`: every setting it could not honour and every
+  compromise it made, the same findings `lint` reports from layout.
 - Page decoration, on every page and under all content: `background`
   ("#FDFAF3", full-bleed) and `border`, a frame measured from the page edge
   whatever the page holds: `{"style": "double", "width": 6, "color":

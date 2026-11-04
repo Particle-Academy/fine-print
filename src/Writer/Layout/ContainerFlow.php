@@ -27,6 +27,16 @@ final class ContainerFlow extends Flowable
         return $h;
     }
 
+    public function notes(): array
+    {
+        $out = [];
+        foreach ($this->children as $child) {
+            array_push($out, ...$child->notes());
+        }
+
+        return $out;
+    }
+
     public function draw(Canvas $c, float $x, float $top): void
     {
         $y = $top;

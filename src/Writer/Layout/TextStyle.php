@@ -22,6 +22,8 @@ final class TextStyle
         public readonly ?array $highlight = null,
         public readonly ?string $link = null,
         public readonly float $letterSpacing = 0.0,
+        public readonly float $rise = 0.0,
+        public readonly ?int $note = null,
     ) {}
 
     /** Width of a string in points, letter spacing included. */
@@ -40,9 +42,9 @@ final class TextStyle
         return -$this->font->descent() * $this->size / 1000;
     }
 
-    /** What the text operators care about: font, size, colour, spacing. */
+    /** What the text operators care about: font, size, colour, spacing, rise. */
     public function textKey(): string
     {
-        return $this->font->id().'|'.$this->size.'|'.implode(',', $this->color).'|'.$this->letterSpacing;
+        return $this->font->id().'|'.$this->size.'|'.implode(',', $this->color).'|'.$this->letterSpacing.'|'.$this->rise;
     }
 }

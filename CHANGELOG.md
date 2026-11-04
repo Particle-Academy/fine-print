@@ -8,9 +8,100 @@ BREAKING and says what a consumer must do.
 
 ## [Unreleased]
 
-Tests and tooling only: no change to anything a consumer installs.
+**What a consumer must do.** Mixed page orientation arrives with no change to a
+document that already wrote correctly: existing documents stay byte-identical,
+and `fine-print/writer-bytes`' 51 rows did not move. Three kinds of document do
+change, and each of them was wrong before:
+
+- **BREAKING for a document that used a key this writer used to ignore silently:**
+  first and even bands, `{blocks}` bands, `margins.header` / `.footer`, `keepNext`
+  on an image, table, code block or rule, a literal `{section}`, `{sectionpages}`,
+  `{title}` or `{author}` in a band, and footnotes. **It now renders differently,
+  and renders what it asked for.** Before, the band or the note was simply absent
+  from the PDF, or the setting did nothing, and no check said so. Do nothing,
+  unless you were relying on the omission; then remove the key. To keep a literal
+  `{section}`, there is no escape: reword it.
+- **BREAKING for a document with a page key on a break itself** (`{"type":
+  "pageBreak", "orientation": "landscape"}`): `validate` now errors, `a pageBreak
+  has no orientation key; use pageBreak.page`, and `toBytes` / `write` throw. Those
+  keys used to be ignored. Move them into `page`; `validateAndRepair` does it for
+  you and says so.
+- **BREAKING for a footnote run with text on it** (`{"text": "x", "footnote":
+  ...}`), a top-level `sections` key, a `blocks` band mixed with `left` / `center` /
+  `right` / `size` / `color`, and `meta` of the wrong shape: `validate` now errors,
+  the same rules as last-word. They were ignored before. `validateAndRepair` fixes
+  all but `sections`, which it refuses, since dropping it would lose the content
+  inside it.
+
+`Agent::write`'s result gains a `warnings` key. An array consumer that does not
+read it is unaffected.
 
 ### Added
+
+- **Mixed portrait and landscape pages in one document**: `pageBreak.page`, the
+  page object's own keys less `background` (owner, 2026-11-04: no new element, and
+  no `sections` key). Each stretch of pages is composed and paginated at its own
+  size, with a MediaBox per page. Pages after a break keep every setting until
+  another break names a change; `margins` merge side by side and every other key
+  is replaced whole. `{}` starts a new stretch with nothing changed. On a break
+  nested in a quote or a table cell it is refused, and so is `background`, since
+  Word has one page colour per document. A break always starts a new page, so one
+  at the very start or end of `blocks` makes a blank page, as a plain break does.
+- **Band tokens:** `{section}` counts the stretches, `{sectionpages}` is the
+  current stretch's page count, `{title}` and `{author}` read the document's.
+  `{page}` and `{pages}` still run through the whole document. Tokens resolve in
+  one pass, so a value is never read for tokens of its own.
+- **`{blocks}` bands**, the body's vocabulary less `pageBreak`, `chart` and
+  `portable` at any depth: a logo, a one-row footer table, a line with a rule under
+  it. Tokens are live in their run text, inside a table cell too. Run formatting
+  works there. A band is laid out at its own page's width, between its margins.
+- **`firstHeader` / `firstFooter` / `evenHeader` / `evenFooter`.** A first band
+  means page 1 at the top level and the first page after a break on a break, and is
+  never inherited. An even band follows the running page number. An empty variant
+  blanks that page's band, as in last-word-ui's `bands.ts`.
+- **`margins.header` and `margins.footer`**, the bands' distances from the page
+  edge, fixed at 36pt before. A blocks band taller than its margin moves the body on
+  the pages that draw it, by the rule in last-word-ui's `geometry.ts` `bodyBox`. A
+  one-line band still never moves it, and `band-overlap` still says so.
+- **`keepNext` on tables, images, code blocks and rules.** An image with `keepNext`
+  keeps its caption. `MAX_KEEP_CHAIN` still bounds it. There is no new keep word
+  (owner's ruling), and the spacing keys on those blocks are still not read.
+- **Footnotes render** (owner: "it should not be losing the footnote"). Numbered in
+  reading order as last-word and last-word-ui number them, a mark at 0.65em raised
+  off its line, each note at the foot of the page holding its mark at 10pt under a
+  short rule, with room reserved, so a line and its note land together. A note too
+  long for the page continues at the foot of the next (`footnote-continued`) and
+  loses no text. Marks may sit in a table cell; the note is set at the page's width.
+  A mark in a repeated header row brings its note to each page it repeats on.
+- **`meta.author`**: the PDF's Author, and what `{author}` shows. Moves `meta` from
+  last-word-only to the shared model.
+- **`Agent::write` returns `warnings`**, what lint already knew from layout. New
+  findings: `band-field-literal` (a `{date}`, `{time}` or `{filename}` token is
+  written as literal text: a PDF has no live date and this writer stamps no time),
+  `image-alt` and `code-language` (accepted, not carried; both `info`), and
+  `band-too-tall`. `tests/Unit/Writer/WriterWarningsTest.php` holds a row for every
+  key the model declares, honoured or warned, so a new key has to say which.
+- **The describer** reports stretches, the first and even bands, and footnotes.
+  A document with none of them describes exactly as it did.
+- **The conformance exporter** writes 52 more `writer-model` rows at the end.
+  `0056` (jsonSchema) and `0057` (guide hash) move; `0001`-`0055` do not.
+  `tests/Sabotage/lists/p2-mixed-pages.php` joins the sabotage lists.
+
+### Fixed
+
+- **A line break in a one-line band dropped everything after it**: `"Line A\nLine
+  B"` drew `Line A` alone, with no finding. Every line is drawn now, stacked from
+  the band's distance. A band of one line is unchanged.
+
+### Changed
+
+- The agent guide and the JSON Schema gain all of the above. Hash pins moved.
+- **An 8-bit RGBA PNG decodes a row at a time**, not a pixel at a time: same bytes,
+  under half the time on a large image. Every other PNG takes the old path; a
+  differential test holds the two together on all five filter types.
+
+
+Tests and tooling, no change to anything a consumer installs:
 
 - **The conformance exporter for the ports**, `tests/Conformance/Export.php`
   (`composer conformance:export`). It writes the `fine-print/php-semantics`,

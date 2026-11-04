@@ -21,6 +21,19 @@ final class Line
         public readonly bool $last,
     ) {}
 
+    /** @return list<int> the footnotes this line carries the marks of, in reading order */
+    public function notes(): array
+    {
+        $out = [];
+        foreach ($this->items as $i) {
+            if ($i['style']->note !== null) {
+                $out[] = $i['style']->note;
+            }
+        }
+
+        return $out;
+    }
+
     public function glueCount(): int
     {
         return count(array_filter($this->items, fn (array $i) => $i['glue']));

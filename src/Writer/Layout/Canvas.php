@@ -37,6 +37,9 @@ final class Canvas
      */
     private float $tc = 0.0;
 
+    /** Text rise (Ts) in effect in the stream: graphics state too, tracked the same way. */
+    private float $ts = 0.0;
+
     /** Lowest point anything was drawn in the body, top-down. */
     public float $bodyBottom = 0.0;
 
@@ -173,6 +176,10 @@ final class Canvas
                 if ($st->letterSpacing !== $this->tc) {
                     $ops .= ' '.Syntax::num($st->letterSpacing).' Tc';
                     $this->tc = $st->letterSpacing;
+                }
+                if ($st->rise !== $this->ts) {
+                    $ops .= ' '.Syntax::num($st->rise).' Ts';
+                    $this->ts = $st->rise;
                 }
                 $ops .= "\n";
                 $key = $st->textKey();

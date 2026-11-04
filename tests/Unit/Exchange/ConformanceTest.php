@@ -155,7 +155,7 @@ function fpxSchemaDef(string $def): array
         'pageBorder' => $s['properties']['page']['properties']['border'],
         'band' => $s['$defs']['band'],
         'run' => $s['$defs']['run'],
-        'paragraph', 'heading', 'table', 'image' => $blocks[$def],
+        'paragraph', 'heading', 'table', 'image', 'pageBreak' => $blocks[$def],
         'listItem' => $s['$defs']['listItem'],
         'tableRow' => $table['rows']['items'],
         'tableCell' => $table['rows']['items']['properties']['cells']['items'],
@@ -218,4 +218,35 @@ it('satisfies the fine-print half of every doc-model/shared row', function (): v
     expect($failed)->toBe([])
         ->and($passed)->toBe(count($cases))
         ->and($passed)->toBeGreaterThanOrEqual(20);
+});
+
+/*
+ * doc-model/page-refusal: the documents last-word refuses and fine-print must
+ * not lose. Messages are the same bytes across packages; paths are not compared,
+ * because Node's are JSON Pointers. `pageKept` is the trap: repairing something
+ * else must not rewrite a break to bare {type} and report success.
+ */
+it('satisfies the fine-print half of every doc-model/page-refusal row', function (): void {
+    $cases = Conformance::cases('doc-model/page-refusal');
+    $failed = [];
+    foreach ($cases as $case) {
+        $doc = $case['input']['doc'];
+        $want = $case['expected']['finePrint'];
+        $repair = Agent::validateAndRepair($doc);
+        $got = ['repairOk' => $repair['ok']];
+        if (array_key_exists('messages', $want)) {
+            $got['messages'] = array_column(Agent::validate($doc), 'message');
+        }
+        if (array_key_exists('pageKept', $want)) {
+            $had = count(array_filter($doc['blocks'], fn (array $b) => ($b['type'] ?? null) === 'pageBreak' && array_key_exists('page', $b)));
+            $kept = count(array_filter($repair['schema']['blocks'], fn (array $b) => ($b['type'] ?? null) === 'pageBreak' && array_key_exists('page', $b)));
+            $got['pageKept'] = $had > 0 && $had === $kept;
+        }
+        if (! Conformance::equals($got, $want)) {
+            $failed[] = $case['id'].' expected '.json_encode($want).' got '.json_encode($got);
+        }
+    }
+
+    expect($failed)->toBe([])
+        ->and(count($cases))->toBeGreaterThanOrEqual(18);
 });

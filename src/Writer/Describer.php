@@ -23,6 +23,8 @@ final class Describer
 
     private int $portable = 0;
 
+    private int $footnotes = 0;
+
     /** @var list<string> */
     private array $tables = [];
 
@@ -44,7 +46,7 @@ final class Describer
         $size = is_string($page['size'] ?? null) && isset(Schema::PAGE_SIZES[$page['size']]) ? $page['size'] : 'letter';
         $orientation = ($page['orientation'] ?? null) === 'landscape' ? 'landscape' : 'portrait';
         $pageLine = "Page: {$size} {$orientation}";
-        foreach (['header', 'footer'] as $band) {
+        foreach (Schema::PAGE_BANDS as $band) {
             if (is_array($page[$band] ?? null)) {
                 $pageLine .= ', '.$band;
             }
@@ -54,7 +56,13 @@ final class Describer
         foreach ($counts as $type => $n) {
             $parts[] = "{$n} {$type}";
         }
-        $lines = ["Document: {$title}", $pageLine, 'Blocks: '.count($blocks).($parts === [] ? '' : ' ('.implode(', ', $parts).')')];
+        $lines = ["Document: {$title}", $pageLine];
+        $stretches = Schema::stretches(['blocks' => $blocks] + $doc);
+        if (count($stretches) > 1) {
+            $shapes = array_map(fn (array $s) => ($s['doc']['page']['orientation'] ?? null) === 'landscape' ? 'landscape' : 'portrait', $stretches);
+            $lines[] = 'Stretches: '.count($stretches).' ('.implode(', ', $shapes).')';
+        }
+        $lines[] = 'Blocks: '.count($blocks).($parts === [] ? '' : ' ('.implode(', ', $parts).')');
         if ($d->tables !== []) {
             $lines[] = 'Tables: '.implode(', ', $d->tables);
         }
@@ -63,6 +71,9 @@ final class Describer
         }
         if ($d->portable > 0) {
             $lines[] = "Portable: {$d->portable} block(s), expanded by validateAndRepair";
+        }
+        if ($d->footnotes > 0) {
+            $lines[] = "Footnotes: {$d->footnotes}";
         }
         $lines[] = "Words: {$d->words}";
 
@@ -129,6 +140,9 @@ final class Describer
     {
         foreach (self::list($runs) as $run) {
             $this->count(is_array($run) ? ($run['text'] ?? null) : $run);
+            if (is_array($run) && is_array($run['footnote'] ?? null)) {
+                $this->footnotes++;
+            }
         }
     }
 
