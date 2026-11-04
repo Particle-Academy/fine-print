@@ -136,6 +136,49 @@ final class Encoders
     }
 
     /**
+     * LZW of a run of one byte, built without holding the run: the most any LZW
+     * expands. Each table fills, each code one byte longer than the last, about
+     * 7.4 MB from about 5.4 KB, which is 1363:1. ISO 32000-1 7.4.4.2 has the
+     * encoder clear a full table, so that is the most a CONFORMING stream reaches.
+     *
+     * $repeats > 0 is the shape that is not conforming: the last table is never
+     * cleared and its longest entry is repeated, about 2559:1 from there on.
+     * Early change 1.
+     */
+    public static function lzwFlat(int $tables = 1, int $repeats = 0, int $byte = 0x20): string
+    {
+        $out = '';
+        $acc = 0;
+        $bits = 0;
+        $emit = function (int $code, int $width) use (&$out, &$acc, &$bits): void {
+            $acc = ($acc << $width) | $code;
+            $bits += $width;
+            while ($bits >= 8) {
+                $bits -= 8;
+                $out .= chr(($acc >> $bits) & 0xFF);
+                $acc &= (1 << $bits) - 1;
+            }
+        };
+        for ($t = 0; $t < $tables; $t++) {
+            $emit(256, $t === 0 ? 9 : 12);
+            $emit($byte, 9);
+            $width = 9;
+            for ($next = 258; $next < 4096; $next++) {
+                $emit($next, $width);
+                if ($next + 2 >= (1 << $width) && $width < 12) {
+                    $width++;
+                }
+            }
+        }
+        for ($i = 0; $i < $repeats; $i++) {
+            $emit(4095, 12);
+        }
+        $emit(257, 12);
+
+        return $bits > 0 ? $out.chr($acc << (8 - $bits)) : $out;
+    }
+
+    /**
      * Raw deflate of a large run of one byte, built incrementally so the test
      * process never holds the expanded form: a decompression bomb.
      */

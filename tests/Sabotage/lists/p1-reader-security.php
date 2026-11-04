@@ -124,6 +124,49 @@ return [
         'filter' => 'decompression bomb',
     ],
     [
+        'what' => 'decoded stream cap unchecked',
+        'edits' => [
+            [
+                'src/Budget.php',
+                'if ($outBytes > $this->limits->maxStreamBytes) {',
+                'if (false) {',
+            ],
+        ],
+        'tests' => [
+            'tests/Unit/HostileInputTest.php',
+            'tests/Unit/DecompressionRatioTest.php',
+        ],
+        'filter' => 'decompression bomb|byte cap',
+    ],
+    [
+        'what' => 'ascii85 stage not judged while it runs',
+        'edits' => [
+            [
+                'src/Filters/Filters.php',
+                'if (($i & 0x3FF) === 0) {',
+                'if (false) {',
+            ],
+        ],
+        'tests' => [
+            'tests/Unit/DecompressionRatioTest.php',
+        ],
+        'filter' => 'inside an ascii85 stage',
+    ],
+    [
+        'what' => 'inflate grows with no memory preflight',
+        'edits' => [
+            [
+                'src/Filters/Filters.php',
+                '$budget->decoding(strlen($out), max(1, $i), strlen($out) + 2 * self::MAX_INFLATE_PIECE);',
+                '',
+            ],
+        ],
+        'tests' => [
+            'tests/Unit/DecompressionRatioTest.php',
+        ],
+        'filter' => 'memory_limit',
+    ],
+    [
         'what' => 'nesting depth unchecked',
         'edits' => [
             [

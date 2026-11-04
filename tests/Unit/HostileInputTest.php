@@ -37,21 +37,41 @@ it('refuses something that is not a PDF', function () {
         ->and($read['refused']['message'])->toBeString();
 });
 
-it('refuses a decompression bomb quickly and in bounded memory', function () {
+it('stops a decompression bomb at the byte cap, quickly and in bounded memory', function () {
     $bomb = Encoders::bomb(200 * 1024 * 1024);
     $b = PdfBuilder::textPdf(['placeholder']);
     // Replace page 1's content (object 4) with the bomb.
     $b->rawStream($bomb, '/Filter /FlateDecode', 4);
     $pdf = $b->build();
 
-    $peak = memory_get_peak_usage();
+    memory_reset_peak_usage();
+    $base = memory_get_usage();
     $t = hrtime(true);
+    $read = Agent::read($pdf);
+
+    // Bounded by maxStreamBytes (64 MB) plus one inflate chunk's output.
+    expect($read['ok'])->toBeFalse()
+        ->and($read['refused']['reason'])->toBe('too_large')
+        ->and((hrtime(true) - $t) / 1e9)->toBeLessThan(5.0)
+        ->and(memory_get_peak_usage() - $base)->toBeLessThan(96 * 1024 * 1024);
+});
+
+it('refuses a decompression bomb no conforming filter could produce, on ratio alone', function () {
+    // Under the byte cap, so only the ratio can refuse it: LZW that never clears.
+    $bomb = Encoders::lzwFlat(repeats: 4000);
+    $b = PdfBuilder::textPdf(['placeholder']);
+    $b->rawStream($bomb, '/Filter /LZWDecode', 4);
+    $pdf = $b->build();
+
+    memory_reset_peak_usage();
+    $base = memory_get_usage();
     $read = Agent::read($pdf);
 
     expect($read['ok'])->toBeFalse()
         ->and($read['refused']['reason'])->toBe('decompression_bomb')
-        ->and((hrtime(true) - $t) / 1e9)->toBeLessThan(5.0)
-        ->and(memory_get_peak_usage() - $peak)->toBeLessThan(48 * 1024 * 1024);
+        ->and($read['refused']['message'])->toContain((string) (int) (new Limits())->maxRatio)
+        ->and((new Limits())->maxRatio)->toBeGreaterThan(1363.0)
+        ->and(memory_get_peak_usage() - $base)->toBeLessThan(48 * 1024 * 1024);
 });
 
 it('caps a decoded stream at its size limit even when the ratio looks innocent', function () {
@@ -129,9 +149,8 @@ it('stops at the memory budget', function () {
  *
  * The show-string bytes are a run of 'a' broken every 100 bytes by a
  * pseudo-random letter: that deflates to about 1/55 of its size, so 3 million
- * codes are a ~55 KB file, yet stays well under the 500x ratio cap. (A plain
- * str_repeat is refused as a decompression bomb before the text is ever read,
- * which tests nothing about the text path.)
+ * codes are a ~55 KB file. (Kept away from a plain str_repeat so the fixture's
+ * size stays what the text path is tested on, whatever the ratio limit is.)
  *
  * Kinds: `tj` a simple font and Tj; `TJ` the same string inside a TJ array;
  * `type0` a Type0 font with Identity-H (fixed two-byte codes); `type0-cmap` a

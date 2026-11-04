@@ -176,7 +176,7 @@ Agent::read($pdf, ['limits' => ['maxPages' => 200, 'timeSeconds' => 5]]);
 | `maxDepth` | 64 | `too_deep` |
 | `maxStreamBytes` | 64 MB per stream | `too_large` |
 | `maxTotalDecodedBytes` | 512 MB | `too_large` |
-| `maxRatio` | 500:1 (past 1 MB) | `decompression_bomb` |
+| `maxRatio` | 1,500:1 per filter stage (past 1 MB), above what flat content reaches under any conforming filter | `decompression_bomb` |
 | `maxOperators` | 2,000,000 per page | `too_many_operators` |
 | `maxFormDepth` | 12 | skipped, with a warning |
 | `maxPages` | 50,000 | `too_many_pages` |

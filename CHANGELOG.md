@@ -8,6 +8,25 @@ BREAKING and says what a consumer must do.
 
 ## [Unreleased]
 
+### Changed
+
+- **`maxRatio` now defaults to 1,500:1, up from 500:1.** 500 refused legitimate flat
+  content, because deflate alone reaches about 1032:1: a white image from this
+  package's own writer could not be rendered back, and some real files could not be
+  read. `maxStreamBytes` (64 MB) is what bounds memory, and it is unchanged.
+  **Do nothing**, unless you pinned on the reason: a very flat stream over 64 MB is
+  now refused as `too_large` rather than `decompression_bomb`, and it holds up to
+  the 64 MB before it is refused rather than a few MB. If your hosts need that lower,
+  set `maxStreamBytes`. To keep the old behaviour, pass `maxRatio: 500`.
+
+### Security
+
+- **Reaching a stream limit is a refusal at a low `memory_limit`, never a fatal
+  error.** Decoding now checks memory before a stream's output grows, so a stream
+  that does not fit is refused as `memory_budget`.
+- **ASCII85 decoding is held to the byte cap while it runs**, not only after it, in
+  every filter chain.
+
 **What a consumer must do.** Mixed page orientation arrives with no change to a
 document that already wrote correctly: existing documents stay byte-identical,
 and `fine-print/writer-bytes`' 51 rows did not move. Three kinds of document do

@@ -130,9 +130,14 @@ final class Budget
     /**
      * Account for one filter stage's output.
      *
+     * $outBytes is judged against the byte cap and the ratio. $needBytes, when
+     * given, is the worst-case allocation the stage is about to make: PHP may
+     * copy a growing string, so the old and the new one are live together, and
+     * a memory_limit hit there is a fatal error rather than a refusal.
+     *
      * @throws RefusedException
      */
-    public function decoding(int $outBytes, int $inBytes): void
+    public function decoding(int $outBytes, int $inBytes, int $needBytes = 0): void
     {
         if ($outBytes > $this->limits->maxStreamBytes) {
             throw new RefusedException('too_large', 'A stream decodes past the '.$this->limits->maxStreamBytes.'-byte limit.');
@@ -140,7 +145,7 @@ final class Budget
         if ($outBytes > $this->limits->ratioFloorBytes && $outBytes > $this->limits->maxRatio * max(1, $inBytes)) {
             throw new RefusedException('decompression_bomb', 'A stream expands more than '.$this->limits->maxRatio.' times: a decompression bomb.');
         }
-        $this->check();
+        $this->allocation($needBytes);
     }
 
     /** @throws RefusedException */

@@ -24,12 +24,18 @@ final class Limits
         public readonly int $maxObjects = 1_000_000,
         /** Nesting of arrays and dictionaries in one value. */
         public readonly int $maxDepth = 64,
-        /** Decoded size of any one stream. */
+        /** Decoded size of any one stream. This, not the ratio, is what bounds memory. */
         public readonly int $maxStreamBytes = 64 * 1024 * 1024,
         /** Decoded size of every stream read, together. */
         public readonly int $maxTotalDecodedBytes = 512 * 1024 * 1024,
-        /** Expansion ratio of one filter stage, once past $ratioFloorBytes. */
-        public readonly float $maxRatio = 500.0,
+        /**
+         * Expansion ratio of one filter stage, once past $ratioFloorBytes.
+         * Above deflate's ceiling (about 1032:1) and a conforming LZW run's
+         * (about 1363:1), because flat content really reaches those; below the
+         * 2559:1 of LZW that never clears its table, which no conforming
+         * encoder writes, so it still refuses that.
+         */
+        public readonly float $maxRatio = 1500.0,
         /** Output below this size is never judged on ratio alone. */
         public readonly int $ratioFloorBytes = 1024 * 1024,
         /** Content-stream operators per page, form XObjects included. */

@@ -21,6 +21,18 @@ use FinePrint\Objects\PdfDict;
  */
 final class Filters
 {
+    /** Deflate's ceiling on one 4 KB input chunk, with room to spare. */
+    private const MAX_INFLATE_PIECE = 4200 * 1024;
+
+    /** The most LZW can grow between two checks: 1024 codes of at most 3839 bytes. */
+    private const MAX_LZW_GROWTH = 1024 * 3839;
+
+    /** The most RunLength can grow between two checks: 1024 runs of at most 128 bytes. */
+    private const MAX_RUN_GROWTH = 1024 * 128;
+
+    /** The most ASCII85 can grow between two checks: 1024 characters of at most 4 bytes. */
+    private const MAX_A85_GROWTH = 1024 * 4;
+
     private const ALIASES = [
         'Fl' => 'FlateDecode',
         'LZW' => 'LZWDecode',
@@ -56,8 +68,8 @@ final class Filters
             $data = match ($name) {
                 'FlateDecode' => self::predict(self::flate($data, $budget), $p, $budget),
                 'LZWDecode' => self::predict(self::lzw($data, self::early($p), $budget), $p, $budget),
-                'ASCII85Decode' => self::ascii85($data),
-                'ASCIIHexDecode' => self::asciiHex($data),
+                'ASCII85Decode' => self::ascii85($data, $budget),
+                'ASCIIHexDecode' => self::asciiHex($data, $budget),
                 'RunLengthDecode' => self::runLength($data, $budget),
                 default => throw new OpaqueStreamException($name),
             };
@@ -94,13 +106,15 @@ final class Filters
         // Small input chunks bound how much ONE call can expand: deflate's
         // ceiling is about 1032:1, so 4 KB in is at most ~4 MB out.
         for ($i = 0; $i < $len; $i += 4096) {
+            // Room for this chunk's output, and for $out to be copied as it grows.
+            $budget->decoding(strlen($out), max(1, $i), strlen($out) + 2 * self::MAX_INFLATE_PIECE);
             $piece = @inflate_add($ctx, substr($data, $i, 4096), ZLIB_SYNC_FLUSH);
             if ($piece === false) {
                 break;
             }
             $out .= $piece;
-            // Judged on the input consumed SO FAR, so a bomb is stopped after
-            // a few megabytes, not after it has finished expanding.
+            // Judged on the input consumed SO FAR, so a bomb is stopped while it
+            // expands, at the byte cap at the latest, never after it has finished.
             $budget->decoding(strlen($out), min($len, $i + 4096));
             if (inflate_get_status($ctx) === ZLIB_STREAM_END) {
                 $ended = true;
@@ -173,7 +187,7 @@ final class Filters
             }
             $out .= $entry;
             if ((++$codes & 0x3FF) === 0) {
-                $budget->decoding(strlen($out), $i);
+                $budget->decoding(strlen($out), $i, strlen($out) + self::MAX_LZW_GROWTH);
             }
             if ($next < 4096) {
                 $dict[$next++] = $prev.$entry[0];
@@ -198,8 +212,9 @@ final class Filters
         return $t;
     }
 
-    private static function ascii85(string $data): string
+    private static function ascii85(string $data, Budget $budget): string
     {
+        $budget->allocation(strlen($data));
         $data = (string) preg_replace('/\s+/', '', $data);
         if (str_starts_with($data, '<~')) {
             $data = substr($data, 2);
@@ -213,6 +228,11 @@ final class Filters
         $group = [];
         $len = strlen($data);
         for ($i = 0; $i < $len; $i++) {
+            // A `z` is four bytes from one: this stage expands, so it is judged
+            // while it runs, like the others.
+            if (($i & 0x3FF) === 0) {
+                $budget->decoding(strlen($out), max(1, $i), strlen($out) + self::MAX_A85_GROWTH);
+            }
             $c = $data[$i];
             if ($c === 'z' && $group === []) {
                 $out .= "\x00\x00\x00\x00";
@@ -250,8 +270,9 @@ final class Filters
         return substr(pack('N', $v & 0xFFFFFFFF), 0, $bytes);
     }
 
-    private static function asciiHex(string $data): string
+    private static function asciiHex(string $data, Budget $budget): string
     {
+        $budget->allocation(2 * strlen($data));
         $end = strpos($data, '>');
         if ($end !== false) {
             $data = substr($data, 0, $end);
@@ -272,7 +293,7 @@ final class Filters
         $runs = 0;
         while ($i < $len) {
             if ((++$runs & 0x3FF) === 0) {
-                $budget->decoding(strlen($out), $i);
+                $budget->decoding(strlen($out), $i, strlen($out) + self::MAX_RUN_GROWTH);
             }
             $n = ord($data[$i++]);
             if ($n === 128) {
@@ -313,6 +334,8 @@ final class Filters
         if (ceil((float) $colors * $bpc * $columns / 8) > min($budget->limits->maxStreamBytes, PHP_INT_MAX / 16)) {
             throw new RefusedException('too_large', 'A predictor row exceeds the decoded stream limit.');
         }
+        // The output grows to the size of $data, and may be copied as it does.
+        $budget->allocation(2 * strlen($data));
         $bpp = max(1, intdiv($colors * $bpc + 7, 8));
         $rowLen = intdiv($colors * $bpc * $columns + 7, 8);
 

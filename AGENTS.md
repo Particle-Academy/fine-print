@@ -359,8 +359,19 @@ does a hostile file get out of this", never by which directory it is in.
   `CMap::split()` still build lists and must not be put back on a hostile
   path.
 - **Decompression is judged while it runs.** Flate is fed in 4 KB chunks, so a
-  bomb is stopped after a few megabytes rather than after it has expanded.
-  Do not "simplify" it to `gzuncompress()`.
+  bomb is stopped at `maxStreamBytes` rather than after it has expanded. Do not
+  "simplify" it to `gzuncompress()`.
+- **`maxStreamBytes` bounds memory; `maxRatio` does not.** Flat content really
+  reaches deflate's ceiling (about 1032:1) and a conforming LZW run about 1363:1,
+  so the ratio sits above both (owner ruling 2026-11-03) and refuses only LZW that
+  never clears its table. Lowering it refuses this package's own flat images. The
+  cap is judged per filter stage, inside each expanding stage, so a chain cannot
+  get past it.
+- **Reaching the cap must not be a fatal error.** A stage's growing string may be
+  copied, so old and new are live together, and at a `memory_limit` of 128M that
+  fatal is under 64 MB. Each stage preflights with `Budget::decoding(..., $need)` or
+  `allocation()` and refuses `memory_budget` instead. A stage that grows `$out`
+  without one is the bug `DecompressionRatioTest` runs in a child to catch.
 - **The extractor keeps invisible characters and hidden text.** Stripping them
   early would hide them from the guard. Only the guard removes anything.
 
