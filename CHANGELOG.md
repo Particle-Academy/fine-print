@@ -8,6 +8,8 @@ BREAKING and says what a consumer must do.
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-11-03
+
 **What you must do: nothing.** No document changes: output is byte for byte what it
 was, and the 1000 limit on spans is not new.
 
