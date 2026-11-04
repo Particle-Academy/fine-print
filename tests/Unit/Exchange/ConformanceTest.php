@@ -153,6 +153,7 @@ function fpxSchemaDef(string $def): array
         'document' => $s,
         'page' => $s['properties']['page'],
         'pageBorder' => $s['properties']['page']['properties']['border'],
+        'pageMargins' => $s['$defs']['pageMargins'],
         'band' => $s['$defs']['band'],
         'run' => $s['$defs']['run'],
         'paragraph', 'heading', 'table', 'image', 'pageBreak' => $blocks[$def],
