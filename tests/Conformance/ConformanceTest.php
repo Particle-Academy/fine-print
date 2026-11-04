@@ -19,7 +19,7 @@ use ParticleAcademy\Conformance\Conformance;
  * The fixture set is pinned EXACTLY in require-dev (no composer.lock is
  * committed), and the first two tests make the pin a checked claim.
  */
-const FPC_PINNED_SUITE_VERSION = '0.44.0';
+const FPC_PINNED_SUITE_VERSION = '0.45.0';
 
 /** Exact row counts. A row lost between the exporter and the loader fails here. */
 const FPC_ROWS = [
