@@ -8,6 +8,21 @@ BREAKING and says what a consumer must do.
 
 ## [Unreleased]
 
+**What you must do: nothing.** No document changes: output is byte for byte what it
+was, and the 1000 limit on spans is not new.
+
+### Fixed
+
+- A span past the limit said `colSpan must be an integer of 1 or more`, which it
+  was. It now says `colSpan must be an integer from 1 to 1000`.
+
+### Security
+
+- Spans in a table cost memory for each slot they covered, so a small document
+  within the limits could exhaust memory in `toBytes()` and `write()`. The composer
+  now places spans without enumerating them. **Consumer action:** upgrade,
+  especially if you accept documents from users or agents.
+
 ## [0.6.0] - 2026-11-03
 
 ### Changed

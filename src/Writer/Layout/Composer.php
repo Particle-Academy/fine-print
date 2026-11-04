@@ -305,30 +305,46 @@ final class Composer
 
         // Place cells on the grid, HTML-style: a row span occupies the slots
         // below it, and later rows' cells flow around them.
-        $occupied = [];
+        // Row spans from above are [lastRow, start, end) intervals, never
+        // enumerated slots: a cell costs the same at any span.
+        $active = [];
         $placed = [];
+        $covered = [];
         $columns = 0;
         $n = count($rows);
         foreach ($rows as $r => $row) {
+            $active = array_values(array_filter($active, static fn (array $s): bool => $s[0] >= $r));
+            usort($active, static fn (array $a, array $b): int => $a[1] <=> $b[1]);
+            $above = count($active);
+            $j = 0;
+            $slots = array_map(static fn (array $s): array => [$s[1], $s[2]], $active);
             $col = 0;
             $placed[$r] = [];
             foreach (is_array($row['cells'] ?? null) ? $row['cells'] : [] as $c => $cell) {
                 if (! is_array($cell)) {
                     continue;
                 }
-                while (isset($occupied[$r][$col])) {
-                    $col++;
+                while ($j < $above && $active[$j][1] <= $col) {
+                    $col = max($col, $active[$j][2]);
+                    $j++;
                 }
                 $span = max(1, min(1000, (int) ($cell['colSpan'] ?? 1)));
                 $rowSpan = max(1, min($n - $r, (int) ($cell['rowSpan'] ?? 1)));
-                for ($rr = $r; $rr < $r + $rowSpan; $rr++) {
-                    for ($cc = $col; $cc < $col + $span; $cc++) {
-                        $occupied[$rr][$cc] = true;
-                    }
+                $slots[] = [$col, $col + $span];
+                if ($rowSpan > 1) {
+                    $active[] = [$r + $rowSpan - 1, $col, $col + $span];
                 }
                 $placed[$r][] = ['cell' => $cell, 'col' => $col, 'span' => $span, 'rowSpan' => $rowSpan, 'path' => "{$path}.rows[{$r}].cells[{$c}]"];
                 $col += $span;
                 $columns = max($columns, $col);
+            }
+            // How many slots of this row are covered, overlaps counted once.
+            usort($slots, static fn (array $a, array $b): int => $a[0] <=> $b[0]);
+            $covered[$r] = 0;
+            $edge = 0;
+            foreach ($slots as [$from, $to]) {
+                $covered[$r] += max(0, $to - max($from, $edge));
+                $edge = max($edge, $to);
             }
         }
         $weights = array_values(array_filter(is_array($block['widths'] ?? null) ? $block['widths'] : [], fn ($w) => is_int($w) || is_float($w)));
@@ -373,8 +389,7 @@ final class Composer
         foreach ($rows as $r => $row) {
             $header = ($row['header'] ?? false) === true;
             $cells = [];
-            $covered = count($occupied[$r] ?? []);
-            if ($covered < $columns) {
+            if ($covered[$r] < $columns) {
                 $ragged = true;
             }
             foreach ($placed[$r] as $p) {

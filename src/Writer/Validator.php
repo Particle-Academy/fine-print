@@ -448,7 +448,7 @@ final class Validator
                 foreach (['colSpan', 'rowSpan'] as $span) {
                     $value = $cell[$span] ?? null;
                     if ($value !== null && (! is_int($value) || $value < 1 || $value > 1000)) {
-                        $this->error("{$cellPath}.{$span}", "{$span} must be an integer of 1 or more");
+                        $this->error("{$cellPath}.{$span}", "{$span} must be an integer from 1 to 1000");
                     }
                 }
                 $this->blocks($cell['blocks'], "{$cellPath}.blocks", $depth + 1);
