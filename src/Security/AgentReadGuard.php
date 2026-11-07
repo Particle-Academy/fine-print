@@ -76,7 +76,14 @@ final class AgentReadGuard
      * `acted` is the findings the policy acted on: what `redact` cut, or what
      * made `discard` withhold everything. Empty under `flag`.
      *
-     * @return array{texts: list<?string>, findings: list<array<string, mixed>>, discarded: bool, acted: list<array<string, mixed>>}
+     * `ranges` is, per segment, what `redact` cut from that segment's ORIGINAL
+     * text: sorted, merged `[start, end, kind]` byte ranges, kind 3 an
+     * instruction, 2 hidden text (both replaced by a marker), 1 invisible
+     * characters (removed). Empty unless the policy is `redact`. Anything
+     * derived from a segment's text (word boxes) is redacted from these, so it
+     * is cut exactly where the text was.
+     *
+     * @return array{texts: list<?string>, findings: list<array<string, mixed>>, discarded: bool, acted: list<array<string, mixed>>, ranges: list<list<array{0: int, 1: int, 2: int}>>}
      */
     public function apply(array $segments): array
     {
@@ -92,10 +99,13 @@ final class AgentReadGuard
         $discarded = $this->policy === 'discard' && $actionable !== [];
 
         $texts = [];
+        $cut = [];
         foreach ($segments as $i => $seg) {
+            $merged = $this->policy === 'redact' ? self::merge($ranges[$i]) : [];
+            $cut[] = $merged;
             $texts[] = match (true) {
                 $discarded => null,
-                $this->policy === 'redact' => self::redact($seg['text'], $ranges[$i]),
+                $this->policy === 'redact' => self::redact($seg['text'], $merged),
                 default => $seg['text'],
             };
         }
@@ -105,6 +115,7 @@ final class AgentReadGuard
             'findings' => $findings,
             'discarded' => $discarded,
             'acted' => $this->policy === 'flag' ? [] : array_values($actionable),
+            'ranges' => $cut,
         ];
     }
 
@@ -337,12 +348,15 @@ final class AgentReadGuard
         }
     }
 
-    /** @param list<array{0: int, 1: int, 2: int}> $ranges */
-    private static function redact(string $text, array $ranges): string
+    /**
+     * Sort and merge overlapping or touching ranges; a merged range takes the
+     * strongest kind of what it covers.
+     *
+     * @param  list<array{0: int, 1: int, 2: int}>  $ranges
+     * @return list<array{0: int, 1: int, 2: int}>
+     */
+    private static function merge(array $ranges): array
     {
-        if ($ranges === []) {
-            return $text;
-        }
         usort($ranges, fn (array $a, array $b) => $a[0] <=> $b[0]);
         $merged = [];
         foreach ($ranges as $r) {
@@ -354,6 +368,16 @@ final class AgentReadGuard
                 continue;
             }
             $merged[] = $r;
+        }
+
+        return $merged;
+    }
+
+    /** @param list<array{0: int, 1: int, 2: int}> $merged sorted and merged ({@see merge()}) */
+    private static function redact(string $text, array $merged): string
+    {
+        if ($merged === []) {
+            return $text;
         }
         $out = '';
         $pos = 0;

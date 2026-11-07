@@ -8,6 +8,8 @@ use FinePrint\Document;
 use FinePrint\Objects\PdfDict;
 use FinePrint\Objects\PdfName;
 use FinePrint\Objects\PdfStream;
+use FinePrint\Render\Glyphs\StandardFonts;
+use FinePrint\Writer\Fonts\StandardMetrics;
 
 /**
  * Turns the bytes of a text-showing operator into Unicode and advance widths.
@@ -40,6 +42,18 @@ final class Font
 
     private bool $hasEncoding = false;
 
+    /** Ascent above the baseline, 1/1000 text space, when the font says (or names a standard-14 face). */
+    private ?float $ascent = null;
+
+    /** Descent below the baseline (zero or negative), 1/1000 text space, likewise. */
+    private ?float $descent = null;
+
+    /** Used when a font gives no usable ascent: 0.8 em. */
+    public const DEFAULT_ASCENT = 800.0;
+
+    /** Used when a font gives no usable descent: -0.2 em. */
+    public const DEFAULT_DESCENT = -200.0;
+
     public static function fromDict(PdfDict $dict, Document $doc): self
     {
         $f = new self();
@@ -56,8 +70,60 @@ final class Font
         } else {
             $f->loadSimple($dict, $doc, $subtype);
         }
+        $f->loadVertical($dict, $doc);
 
         return $f;
+    }
+
+    /**
+     * Ascent in 1/1000 text space: the FontDescriptor's /Ascent, else the
+     * AFM value of a standard-14 face the BaseFont names, else
+     * {@see DEFAULT_ASCENT}. Used for word boxes, never for drawing.
+     */
+    public function ascent(): float
+    {
+        return ($this->ascent ?? self::DEFAULT_ASCENT) * $this->widthScale;
+    }
+
+    /** Descent in 1/1000 text space (zero or negative), found as {@see ascent()} is. */
+    public function descent(): float
+    {
+        return ($this->descent ?? self::DEFAULT_DESCENT) * $this->widthScale;
+    }
+
+    /**
+     * Read /Ascent and /Descent from the font's descriptor (the descendant's,
+     * for Type0). A hostile file controls both, so only sane values are kept:
+     * an ascent in (0, 2000], a descent in [-1000, 0]. Anything else falls
+     * back, as if absent.
+     */
+    private function loadVertical(PdfDict $dict, Document $doc): void
+    {
+        $holder = $dict;
+        if ($this->composite) {
+            $descendants = $doc->resolve($dict->get('DescendantFonts'));
+            $d = is_array($descendants) ? $doc->resolve($descendants[0] ?? null) : null;
+            $holder = $d instanceof PdfDict ? $d : null;
+        }
+        $desc = $holder !== null ? $doc->resolve($holder->get('FontDescriptor')) : null;
+        if ($desc instanceof PdfDict) {
+            $a = $doc->resolve($desc->get('Ascent'));
+            $d = $doc->resolve($desc->get('Descent'));
+            if ((is_int($a) || is_float($a)) && $a > 0 && $a <= 2000) {
+                $this->ascent = (float) $a;
+            }
+            if ((is_int($d) || is_float($d)) && $d >= -1000 && $d <= 0) {
+                $this->descent = (float) $d;
+            }
+        }
+        if ($this->ascent === null || $this->descent === null) {
+            $face = StandardFonts::match($dict->name('BaseFont') ?? '');
+            if ($face !== null) {
+                $v = StandardMetrics::vertical($face);
+                $this->ascent ??= (float) $v['ascent'];
+                $this->descent ??= (float) $v['descent'];
+            }
+        }
     }
 
     /**

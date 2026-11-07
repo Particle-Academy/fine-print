@@ -374,6 +374,15 @@ does a hostile file get out of this", never by which directory it is in.
   without one is the bug `DecompressionRatioTest` runs in a child to catch.
 - **The extractor keeps invisible characters and hidden text.** Stripping them
   early would hide them from the guard. Only the guard removes anything.
+- **Every word is a byte range of the composed page text.** `TextExtractor`
+  (with `words: true`) records whitespace-free pieces per run, packed
+  (`PIECE`), never as arrays; `Layout::compose()` reports where each run landed;
+  `Text\Words` joins pieces only when their ranges are CONTIGUOUS in that text,
+  which is exactly the layout's gap rule. `Agent::guardWords()` then cuts words
+  by the guard's `ranges` over the same bytes. Never join words by geometry
+  instead: a word that is not a substring of the guarded text is a way round
+  the redaction. `WordsTest`'s substring test and a sabotage of the drop were
+  red when written.
 
 ## Traps
 

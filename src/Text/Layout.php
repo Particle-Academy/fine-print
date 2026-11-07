@@ -24,12 +24,21 @@ final class Layout
     private const PARAGRAPH_GAP = 1.8;
 
     /**
+     * `$offsets`, when passed, receives where each run landed in the composed
+     * text: run index (as given) => byte offset. A run that is not in the
+     * text (empty, or a fake-bold repeat) has no entry. Word boxes are built
+     * from it, so every word is a substring of exactly the text the guard
+     * reads.
+     *
      * @param  list<array{text: string, x0: float, y: float, x1: float, size: float, flags: list<string>}>  $runs
+     * @param  array<int, int>|null  $offsets
      * @return array{text: string, spans: list<array{start: int, length: int, flags: list<string>}>}
      */
-    public static function compose(array $runs): array
+    public static function compose(array $runs, ?array &$offsets = null): array
     {
-        $runs = array_values(array_filter($runs, fn (array $r) => $r['text'] !== ''));
+        $offsets = [];
+        // Keys kept: they are the run indexes $offsets reports.
+        $runs = array_filter($runs, fn (array $r) => $r['text'] !== '');
         if ($runs === []) {
             return ['text' => '', 'spans' => []];
         }
@@ -37,6 +46,7 @@ final class Layout
         // Stable sort: baseline descending (PDF y grows upward), then x.
         $keyed = [];
         foreach ($runs as $i => $r) {
+            $r['_run'] = $i;
             $keyed[] = [$r, $i];
         }
         usort($keyed, function (array $a, array $b): int {
@@ -88,6 +98,7 @@ final class Layout
                 if ($r['flags'] !== []) {
                     $spans[] = ['start' => strlen($text), 'length' => strlen($r['text']), 'flags' => $r['flags']];
                 }
+                $offsets[$r['_run']] = strlen($text);
                 $text .= $r['text'];
                 $prev = $r;
             }

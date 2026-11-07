@@ -44,7 +44,7 @@ return [
         'edits' => [
             [
                 'src/Security/AgentReadGuard.php',
-                '$this->policy === \'redact\' => self::redact($seg[\'text\'], $ranges[$i]),',
+                '$this->policy === \'redact\' => self::redact($seg[\'text\'], $merged),',
                 '$this->policy === \'redact\' => $seg[\'text\'],',
             ],
         ],
@@ -193,5 +193,33 @@ return [
             'tests/Unit/HostileInputTest.php',
         ],
         'filter' => 'needs a password',
+    ],
+    [
+        'what' => 'redacted words kept in the agent read',
+        'edits' => [
+            [
+                'src/Agent.php',
+                'if ($drop) {',
+                'if (false) {',
+            ],
+        ],
+        'tests' => [
+            'tests/Unit/WordsTest.php',
+        ],
+        'filter' => 'redacts words exactly as it redacts the page text',
+    ],
+    [
+        'what' => 'word pieces joined across a gap in the guarded text',
+        'edits' => [
+            [
+                'src/Text/Words.php',
+                'if ($cur !== null && $cur[\'end\'] === $start) {',
+                'if ($cur !== null) {',
+            ],
+        ],
+        'tests' => [
+            'tests/Unit/WordsTest.php',
+        ],
+        'filter' => 'redacts words exactly as it redacts the page text',
     ],
 ];

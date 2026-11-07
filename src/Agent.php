@@ -47,7 +47,7 @@ final class Agent
      * This package's own version, kept in ONE place and pinned to the changelog
      * by `VersionIsSingleSourcedTest`.
      */
-    public const VERSION = '0.6.1';
+    public const VERSION = '0.7.0';
 
     /**
      * Read a PDF for an agent.
@@ -60,17 +60,25 @@ final class Agent
      *                 finding. For a human audit log ONLY; never give that report
      *                 to an agent, since an excerpt of an injection is one.
      *   - `limits`    a {@see Limits} or an array of its named arguments
+     *   - `words`     bool, default false — also give each page a `words` list of
+     *                 `{text, x0, x1, top, bottom}` boxes ({@see Document::pageWords()}
+     *                 for the coordinates). Words are redacted exactly as the page
+     *                 text is: a word inside an instruction or hidden text is
+     *                 dropped, and invisible characters the policy removes are
+     *                 removed from inside a word. Every word is a substring of
+     *                 the page `text` the same read returns.
      *
      * A file that is refused — not a PDF, needs a password, damaged beyond repair,
      * or over a limit — returns `['ok' => false, 'refused' => ['reason' => ...,
      * 'message' => ...]]` rather than throwing, so an agent loop gets an answer
      * it can act on. Bad OPTIONS still throw: that is the caller's bug.
      *
-     * @param  array{policy?: string, threshold?: string, excerpts?: bool, limits?: Limits|array<string, int|float>}  $options
+     * @param  array{policy?: string, threshold?: string, excerpts?: bool, limits?: Limits|array<string, int|float>, words?: bool}  $options
      * @return array<string, mixed>
      */
     public static function read(string $bytesOrPath, array $options = []): array
     {
+        self::wordsOption($options);
         $guard = new AgentReadGuard(
             (string) ($options['policy'] ?? 'redact'),
             (string) ($options['threshold'] ?? 'medium'),
@@ -102,11 +110,12 @@ final class Agent
      * The result carries `unredacted: true` and a notice reminding the reader
      * that the document's text is data, never instructions.
      *
-     * @param  array{threshold?: string, excerpts?: bool, limits?: Limits|array<string, int|float>}  $options
+     * @param  array{threshold?: string, excerpts?: bool, limits?: Limits|array<string, int|float>, words?: bool}  $options
      * @return array<string, mixed>
      */
     public static function readUnredacted(string $bytesOrPath, array $options = []): array
     {
+        self::wordsOption($options);
         $options['policy'] = 'flag';
         $guard = new AgentReadGuard('flag', (string) ($options['threshold'] ?? 'medium'), (bool) ($options['excerpts'] ?? false));
         $limits = Limits::from($options['limits'] ?? null);
@@ -189,13 +198,22 @@ final class Agent
     private static function readGuarded(string $bytes, Limits $limits, AgentReadGuard $guard, array $options, bool $unredacted): array
     {
         $doc = Document::open($bytes, $limits);
+        $withWords = self::wordsOption($options);
 
         // Collect every string the agent could see, as guard segments.
         $segments = [];
         $slots = [];
+        $pageWords = [];
         $pages = $doc->pages();
         foreach ($pages as $p) {
-            $pt = $doc->pageText($p['number']);
+            if ($withWords) {
+                // One interpretation gives both, and every word is a byte range
+                // of exactly the text the guard is about to scan.
+                $pt = $doc->pageTextWithWords($p['number']);
+                $pageWords[$p['number']] = [count($segments), $pt['words']];
+            } else {
+                $pt = $doc->pageText($p['number']);
+            }
             $slots[] = ['page', $p['number']];
             $segments[] = ['location' => ['source' => 'page', 'page' => $p['number']], 'text' => $pt['text'], 'spans' => $pt['spans']];
         }
@@ -262,6 +280,10 @@ final class Agent
         $byPage = [];
         foreach ($pages as $p) {
             $byPage[$p['number']] = ['page' => $p['number'], 'width' => $p['width'], 'height' => $p['height'], 'text' => ''];
+            if ($withWords) {
+                [$segment, $words] = $pageWords[$p['number']];
+                $byPage[$p['number']]['words'] = self::guardWords($words, $result['ranges'][$segment] ?? [], $doc->budget());
+            }
         }
         foreach ($slots as $i => $slot) {
             $text = (string) $result['texts'][$i];
@@ -287,6 +309,69 @@ final class Agent
         $out['pages'] = array_values($byPage);
         $out['annotations'] = $annotations;
         $out['outline'] = $outline;
+
+        return $out;
+    }
+
+    /** @param array<string, mixed> $options */
+    private static function wordsOption(array $options): bool
+    {
+        $w = $options['words'] ?? false;
+        if (! is_bool($w)) {
+            throw new InvalidArgumentException('The "words" option must be true or false.');
+        }
+
+        return $w;
+    }
+
+    /**
+     * Apply what the guard cut from a page's text to that page's words.
+     *
+     * Each word is a byte range of the ORIGINAL page text, and `$ranges` are
+     * the guard's sorted, merged cuts over the same bytes. A word touching an
+     * instruction or hidden-text cut (kind 2 or 3) is dropped: that text was
+     * replaced by a marker, and a word box would put it back. Inside an
+     * invisible-character cut (kind 1) those bytes are removed from the word,
+     * as they were from the text. A word left empty is dropped.
+     *
+     * @param  list<array{text: string, x0: float, x1: float, top: float, bottom: float, start: int, end: int}>  $words
+     * @param  list<array{0: int, 1: int, 2: int}>  $ranges
+     * @return list<array{text: string, x0: float, x1: float, top: float, bottom: float}>
+     */
+    private static function guardWords(array $words, array $ranges, Budget $budget): array
+    {
+        $out = [];
+        $j = 0;
+        $n = count($ranges);
+        foreach ($words as $w) {
+            $budget->tick();
+            [$s, $e] = [$w['start'], $w['end']];
+            while ($j < $n && $ranges[$j][1] <= $s) {
+                $j++;
+            }
+            $text = '';
+            $pos = $s;
+            $drop = false;
+            for ($k = $j; $k < $n && $ranges[$k][0] < $e; $k++) {
+                if ($ranges[$k][2] >= 2) {
+                    $drop = true;
+
+                    break;
+                }
+                $text .= substr($w['text'], $pos - $s, max(0, $ranges[$k][0] - $pos));
+                $pos = max($pos, $ranges[$k][1]);
+            }
+            if ($drop) {
+                continue;
+            }
+            if ($pos < $e) {
+                $text .= substr($w['text'], $pos - $s);
+            }
+            if ($text === '') {
+                continue;
+            }
+            $out[] = ['text' => $text, 'x0' => $w['x0'], 'x1' => $w['x1'], 'top' => $w['top'], 'bottom' => $w['bottom']];
+        }
 
         return $out;
     }

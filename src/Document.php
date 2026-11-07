@@ -19,6 +19,7 @@ use FinePrint\Security\StandardSecurity;
 use FinePrint\Text\Layout;
 use FinePrint\Text\TextExtractor;
 use FinePrint\Text\TextString;
+use FinePrint\Text\Words;
 
 /**
  * A parsed PDF — the HOST's raw view of a file.
@@ -348,6 +349,57 @@ final class Document
         $composed = Layout::compose($runs);
 
         return $composed + ['runs' => $runs];
+    }
+
+    /**
+     * A page's words with their boxes, the shape pdfplumber's
+     * `extract_words` gives: `{text, x0, x1, top, bottom}`, in reading order.
+     *
+     * Coordinates are points on the DISPLAYED page: origin at the top-left
+     * corner of the crop box after `/Rotate`, x to the right, `top` and
+     * `bottom` measured DOWN from the top edge (so top < bottom). The page's
+     * displayed width and height are those {@see pages()} reports.
+     *
+     * This is the host's raw view, like {@see pageText()}: hidden and
+     * off-page text is included and nothing is redacted. An agent gets words
+     * through `Agent::read(..., ['words' => true])`, which redacts them as it
+     * redacts the text.
+     *
+     * @return list<array{text: string, x0: float, x1: float, top: float, bottom: float}>
+     */
+    public function pageWords(int $page): array
+    {
+        $out = [];
+        foreach ($this->pageTextWithWords($page)['words'] as $w) {
+            unset($w['start'], $w['end']);
+            $out[] = $w;
+        }
+
+        return $out;
+    }
+
+    /**
+     * {@see pageText()} and the page's words from ONE interpretation, each
+     * word also carrying `start` / `end`: its byte range in `text`. Every
+     * word is exactly `substr(text, start, end - start)`.
+     *
+     * @return array{text: string, spans: list<array{start: int, length: int, flags: list<string>}>, runs: list<array<string, mixed>>, words: list<array{text: string, x0: float, x1: float, top: float, bottom: float, start: int, end: int}>}
+     */
+    public function pageTextWithWords(int $page): array
+    {
+        $p = $this->pageList()[$page - 1] ?? null;
+        if ($p === null) {
+            throw new \OutOfRangeException('No page '.$page);
+        }
+
+        $content = $this->pageContent($p['dict']);
+        $extractor = new TextExtractor($this, $p['cropBox'], $p['rotate'], words: true);
+        $runs = $extractor->extract($content, $p['resources']);
+        $offsets = [];
+        $composed = Layout::compose($runs, $offsets);
+        $words = Words::assemble($extractor->pieces(), $offsets, $composed['text'], $this->budget);
+
+        return $composed + ['runs' => $runs, 'words' => $words];
     }
 
     /**

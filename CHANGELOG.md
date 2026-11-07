@@ -8,6 +8,36 @@ BREAKING and says what a consumer must do.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-07
+
+**What you must do: nothing, unless you want word boxes.** Default output is
+unchanged. To get them, pass `['words' => true]` to `Agent::read()` (or
+`Agent::readUnredacted()`), or call `Document::pageWords($page)` on the host side.
+
+### Added
+
+- Per-word boxes, the shape pdfplumber's `extract_words` gives, for rebuilding
+  table rows from word positions. `Document::pageWords($page)` returns
+  `{text, x0, x1, top, bottom}` in reading order, in points on the displayed page
+  with a top-left origin (`top` and `bottom` measured down from the top of the
+  crop box, `/Rotate` applied). `Agent::read(..., ['words' => true])` adds a
+  `words` list to each page. Approved by the owner on 2026-11-07 (council change
+  CC-fancy-0011); asked for by LiftPoint's Laravel hub.
+  - Words split at whitespace and are placed glyph by glyph from the font's
+    widths. Runs the text layout joins with no space become one word, so every
+    word is a substring of the page text.
+  - `top`/`bottom` come from the FontDescriptor's ascent and descent, else the
+    standard-14 metrics, else 0.8 em / -0.2 em. Fonts without widths give
+    estimated x positions. The README lists what is exact and what is estimated.
+  - Redacted with the text: under `redact`, a word inside a redacted instruction
+    or hidden text is dropped, and removed invisible characters are removed from
+    inside words. `flag` and `readUnredacted()` give every word.
+  - Every `Limits` and budget guard applies to the words path.
+- `Document::pageTextWithWords($page)`: `pageText()` plus the words, each with
+  its `start`/`end` byte range in the text, from one interpretation.
+- `AgentReadGuard::apply()` also returns `ranges`: per segment, the byte ranges
+  `redact` cut. Additive; existing keys are unchanged.
+
 ## [0.6.1] - 2026-11-03
 
 **What you must do: nothing.** No document changes: output is byte for byte what it

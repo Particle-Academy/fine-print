@@ -229,7 +229,77 @@ $doc->pages();                          // number, width, height, rotate, mediaB
 $doc->text(1);                          // raw text, hidden text and invisible characters included
 $doc->metadata();  $doc->xmp();  $doc->outline();  $doc->annotations(1);
 $doc->activeContent();
+$doc->pageWords(1);                     // word boxes, see below; raw, nothing redacted
 ```
+
+## Word boxes
+
+Words with their positions, the shape pdfplumber's `extract_words` gives, for
+rebuilding table rows or columns from where text sits on the page.
+
+```php
+$read = Agent::read($bytes, ['words' => true]);   // guarded; off by default
+$read['pages'][0]['words'];
+// 12 pt Helvetica drawn at (72, 720) on a Letter page:
+// [['text' => 'V-101', 'x0' => 72.0, 'x1' => 104.016, 'top' => 63.384, 'bottom' => 74.484], ...]
+
+Document::open($bytes)->pageWords(1);             // the host's raw view, same shape
+```
+
+Each word is `{text, x0, x1, top, bottom}`, in points, in reading order.
+
+**Coordinates are the displayed page, with a TOP-LEFT origin**, as pdfplumber
+uses: x grows to the right from the crop box's left edge, and `top` and
+`bottom` are measured DOWN from its top edge, so `top < bottom`. A page with
+`/Rotate` is measured as it is displayed (rotated clockwise), so its width and
+height are the swapped ones `pages()` and `Agent::read` report. Text drawn with
+a rotated text matrix or CTM gets the axis-aligned box around its rotated
+outline.
+
+**How a word is found.** A run of shown text splits at whitespace. Runs drawn
+by separate operators (a kerned `TJ`, a cell drawn piece by piece) join into
+one word when the text layout puts them side by side with no space between,
+by the same gap rule that composes `text` (a gap above 0.15 of the font size
+is a space). So every word is a substring of the page's `text`, and a fake-bold
+double strike gives one word, as it gives one line of text.
+
+**What is exact and what is estimated:**
+
+- `x0` and `x1` are exact when the font gives glyph widths (`/Widths`, or `/W`
+  for a Type0 font). PDF requires those for every font except the standard 14.
+  A font with no widths is advanced at 500/1000 em a glyph (600 for Courier,
+  `/MissingWidth` when it has one): the run is split in proportion to its
+  characters, and the x positions are then **estimates**. Character and word
+  spacing (`Tc`, `Tw`) and kerning move the next glyph, never the box.
+- `top` and `bottom` are the baseline plus the font's ascent and descent: the
+  FontDescriptor's `/Ascent` and `/Descent`, else the published metrics of a
+  standard-14 face the font names (Helvetica, Times, Courier and their Arial,
+  Times New Roman and Courier New aliases), else a **default of 0.8 em above
+  and 0.2 em below** the baseline. Implausible values (an ascent outside
+  (0, 2000], a descent outside [-1000, 0]) count as absent. This is a line
+  box from font metrics, not a tight box around the inked glyphs; pdfplumber
+  instead puts the box at the descent and one em above it, so expect `top`
+  to differ by a fraction of the size.
+- Positions are exact PDF geometry. The renderer's downward snap of text to
+  whole pixels does not apply to them.
+- Vertical writing mode (`Identity-V` and other `-V` CMaps) is not supported:
+  such text is measured as if it advanced horizontally.
+- A word whose position overflows to infinity (a hostile matrix) is dropped.
+
+**Redaction.** Under the default `redact` policy, words are cut exactly where the
+page text is: a word touching a redacted instruction or hidden text is dropped
+(the text shows a marker there), and invisible characters the guard removes are
+removed from inside a word, its box unchanged. The words are therefore always the
+tokens of the returned `text` with its markers taken out. `flag` and
+`readUnredacted()` give every word; `discard` gives no pages at all. The guard
+is never bypassed through words: they are cut from the same bytes it scanned.
+
+**Limits.** The words path reads the same streams through the same `Limits`:
+decompression bombs, the operator cap, and the time and memory budgets all
+refuse it as they refuse a text read. Word boxes cost more memory than the
+text they come from, so a page of hundreds of thousands of words can reach
+`memoryBytes` where its text alone would not; that is a `memory_budget`
+refusal, never a fatal error.
 
 ## What it reads
 

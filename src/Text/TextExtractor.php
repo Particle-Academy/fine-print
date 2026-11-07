@@ -60,13 +60,46 @@ final class TextExtractor
     /** @var list<string> form XObjects currently being drawn, outermost first */
     private array $forms = [];
 
+    /**
+     * Word pieces per run, when asked for: run index => packed records of
+     * {@see PIECE} (start and end byte in the run's text, then x0, x1, top,
+     * bottom in page coordinates). Packed, never a list of arrays: a page can
+     * hold millions of pieces.
+     *
+     * @var array<int, string>
+     */
+    private array $pieces = [];
+
+    /** pack() format of one word piece: start, end (bytes in the run), x0, x1, top, bottom. */
+    public const PIECE = 'VVdddd';
+
+    public const PIECE_BYTES = 40;
+
     /** @param list<float> $cropBox */
     public function __construct(
         private readonly Document $doc,
         private readonly array $cropBox,
+        private readonly int $rotate = 0,
+        private readonly bool $words = false,
     ) {
         $this->gs = self::initialState();
         $this->budget = $doc->budget();
+    }
+
+    /**
+     * The word pieces of the last {@see extract()}, when constructed with
+     * `words: true`: run index => packed {@see PIECE} records.
+     *
+     * A piece is a whitespace-free stretch of one run. Its box spans its
+     * first glyph's origin to its last glyph's advance width, and the font's
+     * descent to its ascent, transformed through the text matrix and the CTM
+     * and then onto the displayed page (crop box origin, /Rotate, y down).
+     *
+     * @return array<int, string>
+     */
+    public function pieces(): array
+    {
+        return $this->pieces;
     }
 
     /**
@@ -75,6 +108,7 @@ final class TextExtractor
     public function extract(string $content, ?PdfDict $resources): array
     {
         $this->runs = [];
+        $this->pieces = [];
         $this->interpret($content, $resources, 0);
 
         return $this->runs;
@@ -400,15 +434,43 @@ final class TextExtractor
 
         $start = $this->renderMatrix();
         $text = '';
+        $len = 0;
+        $run = count($this->runs);
+        // The current word piece: its first byte, first glyph's text matrix,
+        // and the last glyph's matrix, width and end byte.
+        $pStart = -1;
+        $pEnd = 0;
+        $pTm = $lastTm = $this->tm;
+        $lastW = 0.0;
         // Streamed, and every code ticks the budget: one show string can hold
         // millions of codes, and only the time and memory budgets bound it.
         // Each code is weighed by what its ToUnicode lookup may cost.
         $cost = $font->codeCost();
         foreach ($font->decode($s->bytes) as [$u, $w, $isSpace]) {
             $this->budget->tick($cost);
+            if ($this->words) {
+                if ($u !== '' && strspn($u, " \t\n\r\f\v") === strlen($u)) {
+                    if ($pStart >= 0) {
+                        $this->piece($run, $font, $pStart, $pEnd, $pTm, $lastTm, $lastW);
+                        $pStart = -1;
+                    }
+                } else {
+                    if ($pStart < 0) {
+                        $pStart = $len;
+                        $pTm = $this->tm;
+                    }
+                    $lastTm = $this->tm;
+                    $lastW = $w;
+                    $pEnd = $len + strlen($u);
+                }
+            }
             $text .= $u;
+            $len += strlen($u);
             $tx = ($w / 1000 * $size + $this->gs['tc'] + ($isSpace ? $this->gs['tw'] : 0)) * $th;
             $this->tm = self::mul([1, 0, 0, 1, $tx, 0], $this->tm);
+        }
+        if ($pStart >= 0) {
+            $this->piece($run, $font, $pStart, $pEnd, $pTm, $lastTm, $lastW);
         }
         $end = $this->renderMatrix();
         $height = hypot($start[2], $start[3]);
@@ -426,12 +488,72 @@ final class TextExtractor
     /** @return list<float> */
     private function renderMatrix(): array
     {
+        return $this->renderMatrixAt($this->tm);
+    }
+
+    /** @param list<float> $tm @return list<float> */
+    private function renderMatrixAt(array $tm): array
+    {
         $g = $this->gs;
 
         return self::mul(
             [$g['size'] * $g['th'], 0, 0, $g['size'], 0, $g['ts']],
-            self::mul($this->tm, $g['ctm']),
+            self::mul($tm, $g['ctm']),
         );
+    }
+
+    /**
+     * Record one word piece of run $run: bytes [$start, $end) of its text,
+     * from the glyph drawn at $firstTm to the one at $lastTm (width $lastW,
+     * 1/1000 text space). The box is the four corners of that span, from
+     * descent to ascent, transformed and bounded. A piece whose box is not
+     * finite (an overflowing matrix) is dropped: it has no position to give.
+     *
+     * @param  list<float>  $firstTm
+     * @param  list<float>  $lastTm
+     */
+    private function piece(int $run, Font $font, int $start, int $end, array $firstTm, array $lastTm, float $lastW): void
+    {
+        $a = $font->ascent() / 1000;
+        $d = $font->descent() / 1000;
+        $w = $lastW / 1000;
+        $m0 = $this->renderMatrixAt($firstTm);
+        $m1 = $this->renderMatrixAt($lastTm);
+        $x0 = $y0 = INF;
+        $x1 = $y1 = -INF;
+        foreach ([[$m0, 0.0, $d], [$m0, 0.0, $a], [$m1, $w, $d], [$m1, $w, $a]] as [$m, $u, $v]) {
+            [$px, $py] = $this->toPage($u * $m[0] + $v * $m[2] + $m[4], $u * $m[1] + $v * $m[3] + $m[5]);
+            // Checked per corner: min() and max() can step over a NAN.
+            if (! is_finite($px) || ! is_finite($py)) {
+                return;
+            }
+            $x0 = min($x0, $px);
+            $x1 = max($x1, $px);
+            $y0 = min($y0, $py);
+            $y1 = max($y1, $py);
+        }
+        // Appended in place: rebuilding the string per piece is quadratic in a long run.
+        $this->pieces[$run] ??= '';
+        $this->pieces[$run] .= pack(self::PIECE, $start, $end, $x0, $x1, $y0, $y1);
+    }
+
+    /**
+     * User space to the displayed page: origin at the crop box's top-left
+     * corner AFTER /Rotate (clockwise), y growing down. The same mapping the
+     * renderer's base matrix makes at scale 1.
+     *
+     * @return array{0: float, 1: float}
+     */
+    private function toPage(float $x, float $y): array
+    {
+        [$bx0, $by0, $bx1, $by1] = $this->cropBox;
+
+        return match ($this->rotate) {
+            90 => [$y - $by0, $x - $bx0],
+            180 => [$bx1 - $x, $y - $by0],
+            270 => [$by1 - $y, $bx1 - $x],
+            default => [$x - $bx0, $by1 - $y],
+        };
     }
 
     private function font(string $name, ?PdfDict $resources): ?Font
