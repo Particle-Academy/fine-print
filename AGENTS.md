@@ -475,3 +475,12 @@ the `local` group: it is built at test time from the machine's
 the PDF's SHA-256 (`p2-dejavu.pdf.sha256`); a different font version skips.
 The text bounds were revised after the first run; `GoldenTest` says why, and
 its "wrong on purpose" controls must keep failing.
+
+## Release checklist
+
+- [ ] Agent guide (`agent-guide/building-pdfs.md`) reviewed against this
+  release's CHANGELOG. `AgentGuideCoversTheApiTest` fails when a public `Agent`
+  method is never named in the guide (or allowlisted there with a reason), but
+  it cannot see a new option or a changed return shape; only the review can.
+  A guide edit moves `FPW_GUIDE_SHA256` and the `fine-print/writer-model#guide`
+  conformance row, so `DriftTest` stays red until fancy-conformance re-exports.

@@ -13,8 +13,10 @@ use FinePrint\Agent;
  * Agent guide hash, over LF-normalised content. Edit the guide, then this.
  * 0.5.0: the portable-block section and extract/describe.
  * Mixed pages: page on a break, bands, keepNext on more blocks, footnotes, warnings.
+ * 0.7.1: read()'s shape, refusals, limits and word boxes; toPortable,
+ * validateContent, export, exportToolDefinition, pageCount.
  */
-const FPW_GUIDE_SHA256 = 'b5f2667b5deb08965200d10b27fed802fcf9105cbf6d32061a1566403f918d0b';
+const FPW_GUIDE_SHA256 = 'a066d164027ef65f1cb2642e5d1063d01f24f10862225073ad0d5d000ca17814';
 
 /**
  * JSON schema hash: the model an agent is given. A change to it is a change

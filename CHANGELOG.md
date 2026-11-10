@@ -8,6 +8,31 @@ BREAKING and says what a consumer must do.
 
 ## [Unreleased]
 
+**What you must do: nothing.** The agent guide's text changed; no code did.
+A patch release.
+
+### Changed
+
+- **The agent guide covers reading in full.** `Agent::read()`'s result shape,
+  its `{ok: false, refused}` answer for a file it will not read, the `limits`
+  option, and the 0.7.0 word boxes (`words: true`: `{text, x0, x1, top,
+  bottom}`, top-left origin, redacted with the text) with how to rebuild a table
+  row from them. It now also names `toPortable`, `validateContent`, `export` /
+  `exportToolDefinition` (off unless the host's policy enables a target) and
+  `pageCount`. The guide's SHA-256 moves, and with it the
+  `fine-print/writer-model#guide` conformance row.
+
+Tests and tooling, no change to anything a consumer installs:
+
+- `AgentGuideCoversTheApiTest` fails when a public `Agent` method is never
+  named in the guide, unless it is on the test's allowlist with a reason
+  (`guide`, `version`). It failed against the 0.7.0 guide, which never named
+  `validateContent`, `toPortable`, `export`, `exportToolDefinition` or
+  `pageCount`.
+- `phpunit.xml` forces `DB_CONNECTION=sqlite` and `DB_DATABASE=:memory:` (env
+  and server, `force="true"`), so an inherited database setting can never reach
+  a test.
+
 ## [0.7.0] - 2026-11-07
 
 **What you must do: nothing, unless you want word boxes.** Default output is
