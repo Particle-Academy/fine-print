@@ -47,7 +47,7 @@ final class Agent
      * This package's own version, kept in ONE place and pinned to the changelog
      * by `VersionIsSingleSourcedTest`.
      */
-    public const VERSION = '0.7.0';
+    public const VERSION = '0.7.1';
 
     /**
      * Read a PDF for an agent.

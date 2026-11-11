@@ -8,6 +8,8 @@ BREAKING and says what a consumer must do.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-10
+
 **What you must do: nothing.** The agent guide's text changed; no code did.
 A patch release.
 
@@ -32,6 +34,9 @@ Tests and tooling, no change to anything a consumer installs:
 - `phpunit.xml` forces `DB_CONNECTION=sqlite` and `DB_DATABASE=:memory:` (env
   and server, `force="true"`), so an inherited database setting can never reach
   a test.
+- Dev pin on `particle-academy/fancy-conformance` moves from 0.45.0 to 0.47.0,
+  whose `fine-print/writer-model#guide` row carries this guide's hash. It is
+  `require-dev` only.
 
 ## [0.7.0] - 2026-11-07
 

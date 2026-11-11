@@ -39,7 +39,7 @@
         "illuminate/events": "^13.0",
         "illuminate/http": "^13.0",
         "illuminate/routing": "^13.0",
-        "particle-academy/fancy-conformance": "0.45.0"
+        "particle-academy/fancy-conformance": "0.47.0"
     },
     "suggest": {
         "illuminate/cache": "Only needed for the optional Laravel page-image helper; core reading, writing and rendering need no framework.",
