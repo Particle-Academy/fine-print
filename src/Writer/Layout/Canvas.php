@@ -29,6 +29,14 @@ final class Canvas
     private array $images = [];
 
     /**
+     * Signing fields drawn on this page, in drawing order. `rect` is in PDF
+     * user space (bottom-up): [x0, y0, x1, y1].
+     *
+     * @var list<array{id: string, kind: string, signer: string, required: bool, origin: string, rect: array{0: float, 1: float, 2: float, 3: float}}>
+     */
+    private array $fields = [];
+
+    /**
      * Character spacing (Tc) in effect in the stream. It is graphics state,
      * so it outlives BT/ET and is only restored by Q; it must be tracked per
      * page, never per text object, or one tracked run leaks into every later
@@ -246,6 +254,26 @@ final class Canvas
     private function addLink(array $open, float $base): void
     {
         $this->links[] = ['rect' => [$open['x0'], $base - $open['desc'], $open['x1'], $base + $open['asc']], 'uri' => $open['uri']];
+    }
+
+    /**
+     * Record a signing field's box (top-down in, bottom-up out) and draw a light
+     * outline for it. Nothing here is a widget or an annotation.
+     */
+    public function field(string $id, string $kind, string $signer, bool $required, string $origin, float $x, float $top, float $w, float $h): void
+    {
+        $this->fields[] = [
+            'id' => $id, 'kind' => $kind, 'signer' => $signer, 'required' => $required, 'origin' => $origin,
+            'rect' => [round($x, 2), round($this->height - $top - $h, 2), round($x + $w, 2), round($this->height - $top, 2)],
+        ];
+        $this->ops .= 'q 0.5 w '.Syntax::stroke([0.75, 0.75, 0.75])." [2 2] 0 d\n"
+            .Syntax::num($x).' '.Syntax::num($this->height - $top - $h).' '.Syntax::num($w).' '.Syntax::num($h)." re S Q\n";
+    }
+
+    /** @return list<array{id: string, kind: string, signer: string, required: bool, origin: string, rect: array{0: float, 1: float, 2: float, 3: float}}> */
+    public function fields(): array
+    {
+        return $this->fields;
     }
 
     public function content(): string

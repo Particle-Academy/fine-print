@@ -65,6 +65,9 @@ final class Composer
 
     private float $bodyHeight = 0.0;
 
+    /** Whether signing field nodes are laid out ({@see enableFields()}). */
+    private bool $fieldsOn = false;
+
     /** 'body', 'band' or 'note': only a run in the body makes a footnote. */
     private string $mode = 'body';
 
@@ -209,8 +212,57 @@ final class Composer
             'image' => [$this->image($block, $width, $ctx, $path)],
             'hr' => [$this->rule($block, $width, $path)],
             'pageBreak' => [new PageBreakFlow()],
+            'signatureField', 'initialsField', 'dateSignedField' => $this->field($block, $width, $ctx, $path),
             default => [],
         };
+    }
+
+    /** Lay out signing field nodes (the signing extension). Off unless the writer turns it on. */
+    public function enableFields(): void
+    {
+        $this->fieldsOn = true;
+    }
+
+    /**
+     * @param  array<string, mixed>  $block
+     * @param  array<string, mixed>  $ctx
+     * @return list<Flowable>
+     */
+    private function field(array $block, float $width, array $ctx, string $path): array
+    {
+        if (! $this->fieldsOn || $this->mode !== 'body') {
+            $this->diagnostics->add('field-not-drawn', 'warning', $path, 'a signing field is drawn only by the signing extension, and only in the body');
+
+            return [];
+        }
+        $kind = Schema::FIELD_KINDS[$block['type']];
+
+        return [$this->place($this->fieldFlow(
+            (string) $block['id'], $kind, (string) $block['signer'], ($block['required'] ?? true) !== false,
+            is_string($block['label'] ?? null) ? $block['label'] : null, $width, $ctx, $path,
+        ), self::keepOnly($block), $path, ['spaceBefore' => 6.0, 'spaceAfter' => 10.0, 'keepNext' => false])];
+    }
+
+    /**
+     * One field, as a flowable. Public so the writer can build the generated
+     * signature page's fields with exactly the same geometry.
+     *
+     * @param  array<string, mixed>|null  $ctx
+     */
+    public function fieldFlow(string $id, string $kind, string $signer, bool $required, ?string $label, float $width, ?array $ctx = null, string $path = '', string $origin = 'node'): FieldFlow
+    {
+        [$w, $h] = FieldFlow::SIZES[$kind];
+        $w = min($w, $width);
+        $ctx ??= $this->baseContext();
+        $ctx['size'] = 8.0;
+        $ctx['bold'] = false;
+        $ctx['italic'] = false;
+        $ctx['color'] = '#6B7280';
+        $style = $this->style([], $ctx, $path);
+        $text = $label ?? ['signature' => 'Signature', 'initials' => 'Initials', 'date_signed' => 'Date signed'][$kind];
+        $lines = trim($text) === '' ? [] : $this->breaker->lines([['text' => $this->clean($text, $path), 'style' => $style]], $w, 1.0, $style, $path);
+
+        return new FieldFlow($id, $kind, $signer, $required, $w, $h, $lines, $origin);
     }
 
     /**

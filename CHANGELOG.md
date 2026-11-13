@@ -8,6 +8,40 @@ BREAKING and says what a consumer must do.
 
 ## [Unreleased]
 
+**What you must do: nothing.** Everything below is opt-in and additive; a
+document without field nodes writes the same bytes as before. Built for
+fancy-sign (CC-fancy-0036 phase 0), and useful to any forms or stamping host.
+
+### Added
+
+- **Signing field nodes**, an opt-in extension to the document model:
+  `signatureField`, `initialsField` and `dateSignedField`, each
+  `{id, signer, required?, label?}`. They are NOT in the shared last-word model,
+  so `Agent::validate()` and the default JSON Schema refuse them as before;
+  `Agent::validate($doc, ['fields' => true])` and
+  `Schema::jsonSchema(fields: true)` accept them. Ids are unique per document,
+  and fields are refused in bands and footnotes. A field is DRAWN (a dashed box,
+  a rule and a label): no `/AcroForm`, widget or annotation is written.
+- **`Writer\Signable::write($doc, $options)`**, a host API (deliberately not on
+  `Agent`). It returns the bytes plus a **placement map**: where every field
+  landed (`page`, `rect` in PDF points), computed from the layout, so a
+  re-flowed document can never leave a field over the wrong line.
+  - `signaturePage`: appends a generated page (its own stretch, after the
+    authored pages) listing each signer with a signature and a date field, plus
+    an optional reference and content hash.
+  - `pageMarks`: an initials or signature box per signer in the bottom margin of
+    pages 1 to `authoredPages` only, so the generated page never carries one, at
+    any page count. A margin too small for a mark is reported as
+    `page-mark-no-room`.
+- **`Writer\Incremental::overlay($pdf, $marks)`**: an append-only incremental
+  update (a `/Prev` cross-reference section) that draws paths and WinAnsi
+  Helvetica text over existing pages. The original file stays a byte-for-byte
+  prefix of the result. It refuses a file that needed repair, an encrypted
+  file, a file whose last cross-reference section is a stream, and any mark
+  past its limits (`Incremental::MAX_ITEMS`, `MAX_POINTS`, `MAX_TEXT`,
+  `MAX_COORD`). Text is written only as hex strings. Appending pages and a
+  `/Sig` placeholder are not built yet (fancy-sign phase 2).
+
 ## [0.7.1] - 2026-11-10
 
 **What you must do: nothing.** The agent guide's text changed; no code did.

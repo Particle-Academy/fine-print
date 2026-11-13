@@ -380,12 +380,17 @@ final class Agent
      * Validate a document without writing anything: a `{path, message}` list,
      * empty when the document is valid. Hand it back to the agent as-is.
      *
+     * Option `fields` (bool, default false) accepts the signing extension's
+     * field nodes (`signatureField`, `initialsField`, `dateSignedField`). They
+     * are not in the shared document model, so they are refused without it.
+     *
      * @param  array<string, mixed>  $doc
+     * @param  array{fields?: bool}  $options
      * @return list<array{path: string, message: string}>
      */
-    public static function validate(array $doc): array
+    public static function validate(array $doc, array $options = []): array
     {
-        return (new Validator)->validate($doc);
+        return (new Validator(fields: ($options['fields'] ?? false) === true))->validate($doc);
     }
 
     /**

@@ -53,6 +53,20 @@ final class PdfWriter
         $composer = new Composer($fonts, $images, $diagnostics, $doc);
         $bands = new PageBands($composer, $diagnostics);
 
+        // The signing extension (see Signable, which validates these options).
+        // A generated signature page is appended as a stretch of its own, so the
+        // pages before it are exactly the authored ones.
+        $signing = ($this->options['fields'] ?? false) === true;
+        if ($signing) {
+            $composer->enableFields();
+        }
+        $appendedAt = null;
+        if ($signing && is_array($this->options['signaturePage'] ?? null) && $this->options['signaturePage'] !== []) {
+            $appendedAt = count(Schema::stretches($doc));
+            $doc['blocks'] = array_merge(is_array($doc['blocks'] ?? null) ? array_values($doc['blocks']) : [], [['type' => 'pageBreak', 'page' => []]], $this->options['signaturePage']);
+        }
+        $authored = null;
+
         // A stretch at a time: a run of pages of one shape, composed and
         // paginated at its own size. The first page of a stretch is numbered by
         // the pages before it, so even bands follow the document's own numbering.
@@ -66,6 +80,9 @@ final class PdfWriter
             $m = Schema::margins($stretch['doc']);
             $frameWidth = $pw - $m['left'] - $m['right'];
             $done = count($pages);
+            if ($s === $appendedAt) {
+                $authored = $done;
+            }
 
             $boxAt = fn (int $index): array => $bands->body($stretch, $m, $frameWidth, $ph, $done + $index + 1, $index === 0);
             // An image is capped to the shortest body it could land on: the
@@ -118,6 +135,24 @@ final class PdfWriter
                 'section' => (string) $p['section'], 'sectionpages' => (string) $p['count'],
             ] + PageBands::docFields($doc);
             $bands->draw($canvas, $p['stretch'], $p['m'], $fields, $i + 1, $p['first']);
+        }
+
+        // Per-page marks, on the authored pages only: the generated page comes
+        // after them, so it can never carry one, by construction.
+        $authored ??= $total;
+        if ($signing && is_array($this->options['pageMarks'] ?? null)) {
+            for ($i = 0; $i < $authored; $i++) {
+                $this->pageMarks($pages[$i], $placed[$i]['m'], $i + 1, $this->options['pageMarks'], $composer, $diagnostics);
+            }
+        }
+        $placement = [];
+        foreach ($pages as $i => $canvas) {
+            foreach ($canvas->fields() as $f) {
+                if ($i + 1 > $authored && $f['origin'] === 'node') {
+                    $f['origin'] = 'final_page';
+                }
+                $placement[] = ['id' => $f['id'], 'kind' => $f['kind'], 'signer' => $f['signer'], 'required' => $f['required'], 'origin' => $f['origin'], 'page' => $i + 1, 'rect' => $f['rect']];
+            }
         }
 
         $file = new PdfFile(($this->options['compress'] ?? true) !== false);
@@ -189,7 +224,43 @@ final class PdfWriter
             'diagnostics' => $diagnostics->all(),
             'fill' => $fill,
             'stranded' => $stranded,
+            'fields' => $placement,
+            'authoredPages' => $authored,
         ];
+    }
+
+    /** Mark sizes in points, by kind: [width, height]. */
+    private const MARK_SIZES = ['initials' => [54.0, 22.0], 'signature' => [120.0, 26.0]];
+
+    /**
+     * One page's per-page marks: a box per signer in the bottom margin, right
+     * aligned, under the body.
+     *
+     * @param  array<string, float>  $m
+     * @param  array{kind: string, signers: list<array{id: string, label?: string}>}  $spec
+     */
+    private function pageMarks(Canvas $canvas, array $m, int $page, array $spec, Composer $composer, Diagnostics $diagnostics): void
+    {
+        $kind = $spec['kind'];
+        [$w, $h] = self::MARK_SIZES[$kind];
+        $room = $m['bottom'] - 8.0;
+        if ($room < 12.0) {
+            $diagnostics->add('page-mark-no-room', 'warning', 'page.margins.bottom', 'the bottom margin is too small for a per-page mark: it is drawn over the page edge, so make the margin at least 40 points', $page);
+        }
+        $h = max(12.0, min($h, $room));
+        $top = $canvas->height - $m['bottom'] + 4.0;
+        $right = $canvas->width - $m['right'];
+        foreach ($spec['signers'] as $j => $signer) {
+            $x = $right - ($j + 1) * $w - $j * 8.0;
+            $canvas->field("page-{$page}-{$kind}-{$signer['id']}", $kind, $signer['id'], true, 'page_mark', $x, $top, $w, $h);
+            $canvas->line($x, $top + $h, $x + $w, $top + $h, 0.5, [0.2, 0.2, 0.2]);
+            $label = $signer['label'] ?? '';
+            if ($label !== '') {
+                foreach ($composer->bandLines($label, ['size' => 6], [], 'pageMarks') as $line) {
+                    $canvas->text($line, $x, $top + $h + 1.0, $w, 'left');
+                }
+            }
+        }
     }
 
     /** The package version, for anyone who wants it next to the Producer. */

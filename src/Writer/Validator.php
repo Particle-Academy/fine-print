@@ -38,7 +38,16 @@ final class Validator
     /** @var array<string, array<string, mixed>> a top-level break's path => the document as its stretch sees it */
     private array $stretchAt = [];
 
-    public function __construct(private readonly int $maxImagePixels = Image::MAX_PIXELS) {}
+    /** @var array<string, true> field ids seen so far in this document */
+    private array $fieldIds = [];
+
+    /**
+     * @param  bool  $fields  accept the signing extension's field nodes ({@see Schema::FIELD_TYPES})
+     */
+    public function __construct(
+        private readonly int $maxImagePixels = Image::MAX_PIXELS,
+        private readonly bool $fields = false,
+    ) {}
 
     /**
      * @param  array<string, mixed>  $doc
@@ -49,6 +58,7 @@ final class Validator
         $this->errors = [];
         $this->context = 'body';
         $this->stretchAt = [];
+        $this->fieldIds = [];
 
         if (array_key_exists('title', $doc) && ! is_string($doc['title'])) {
             $this->error('title', 'title must be a string when present');
@@ -271,6 +281,11 @@ final class Validator
         }
         if ($this->context === 'footnote' && in_array($type, Schema::FOOTNOTE_REFUSED_TYPES, true)) {
             $this->error("{$path}.type", "a footnote cannot hold a {$type} block");
+
+            return;
+        }
+        if (in_array($type, Schema::FIELD_TYPES, true)) {
+            $this->field($block, $type, $path);
 
             return;
         }
@@ -675,6 +690,49 @@ final class Validator
             $this->enum($border['style'] ?? null, "{$edgePath}.style", 'border style', Schema::BORDER_STYLES);
             $this->number($border['width'] ?? null, "{$edgePath}.width", 'border width', positive: true);
             $this->hex($border['color'] ?? null, "{$edgePath}.color", 'border color');
+        }
+    }
+
+    /**
+     * A signing field node. Refused unless the caller opted in, and never in a
+     * band or a footnote: per-page marks are a writer option, not band content.
+     *
+     * @param  array<string, mixed>  $block
+     */
+    private function field(array $block, string $type, string $path): void
+    {
+        if (! $this->fields) {
+            $this->error("{$path}.type", "{$type} is a signing field: it is accepted only with the signing extension (fields: true)");
+
+            return;
+        }
+        if ($this->context !== 'body') {
+            $this->error("{$path}.type", "a {$this->context} cannot hold a {$type}: put fields in the body");
+
+            return;
+        }
+        foreach (array_keys($block) as $key) {
+            if (! in_array($key, ['type', 'id', 'signer', 'required', 'label'], true)) {
+                $this->error("{$path}.{$key}", "unknown key on {$type}");
+            }
+        }
+        $id = $block['id'] ?? null;
+        if (! is_string($id) || preg_match(Schema::FIELD_ID, $id) !== 1) {
+            $this->error("{$path}.id", 'a field id is 1 to 64 of A-Z, a-z, 0-9, _ and -');
+        } elseif (isset($this->fieldIds[$id])) {
+            $this->error("{$path}.id", 'field ids must be unique in the document');
+        } else {
+            $this->fieldIds[$id] = true;
+        }
+        $signer = $block['signer'] ?? null;
+        if (! is_string($signer) || preg_match(Schema::FIELD_ID, $signer) !== 1) {
+            $this->error("{$path}.signer", 'a signer id is 1 to 64 of A-Z, a-z, 0-9, _ and -');
+        }
+        if (array_key_exists('required', $block) && ! is_bool($block['required'])) {
+            $this->error("{$path}.required", 'required must be a boolean');
+        }
+        if (array_key_exists('label', $block) && (! is_string($block['label']) || mb_strlen($block['label'], 'UTF-8') > Schema::FIELD_LABEL_MAX)) {
+            $this->error("{$path}.label", 'label must be a string of at most '.Schema::FIELD_LABEL_MAX.' characters');
         }
     }
 

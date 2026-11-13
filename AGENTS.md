@@ -291,6 +291,29 @@ Writer invariants:
 - **Images are bounded**: `Image::MAX_PIXELS`, `MAX_BYTES`, and every PNG is
   inflated once at parse to prove it is exactly what IHDR promises.
 
+## Signing extension (fields, signature page, incremental updates)
+
+- **Field nodes are opt-in and stay out of the shared model.** `Schema::FIELD_TYPES`
+  never joins `BLOCK_TYPES` or the default `jsonSchema()`: `doc-model/shared`
+  compares that schema with last-word's, and last-word has no fields. Only
+  `Validator(fields: true)`, `jsonSchema(fields: true)` and `Signable` see them.
+- **A field is drawing, never a widget.** `Canvas::field()` records the box and
+  draws a dashed outline. No `/AcroForm`, `/Widget` or annotation; the
+  forbidden-name tests cover the signing output too.
+- **Placement is computed, never stored.** The map comes from `Canvas::fields()`
+  after pagination. `origin` is `node`, `final_page` (any field after
+  `authoredPages`, which only the generated page can hold) or `page_mark`.
+- **Per-page marks are drawn after the bands, on pages 1 to `authoredPages`.**
+  The signature page is appended as its own stretch, so that bound is exactly
+  the authored pages, by construction.
+- **`Signable` is a host API, not on `Agent`.** `AgentGuideCoversTheApiTest`
+  needs every public `Agent` method in the agent guide, and a guide edit moves a
+  conformance hash. Who signs is the host's decision anyway.
+- **`Incremental` keeps the original as a byte-for-byte prefix.** It only appends.
+  It refuses repaired files (their xref cannot be a `/Prev`), encrypted files and
+  xref-stream files. Page dictionaries are re-serialised from the parsed objects;
+  a stream value inside one is refused rather than guessed at.
+
 ## Exchange (portable content, exports)
 
 `src/Exchange`: `Content` (validation, limits, `truncateCell`, canonical

@@ -20,6 +20,24 @@ final class Schema
     /** @var list<string> */
     public const BLOCK_TYPES = ['heading', 'paragraph', 'list', 'table', 'code', 'quote', 'image', 'pageBreak', 'hr'];
 
+    /**
+     * The signing extension's field nodes. NOT part of the shared document
+     * model: last-word has no such blocks, so they are accepted only when a
+     * caller opts in (`fields: true`), and the default schema never lists them.
+     *
+     * @var list<string>
+     */
+    public const FIELD_TYPES = ['signatureField', 'initialsField', 'dateSignedField'];
+
+    /** A field node's kind as the placement map reports it. */
+    public const FIELD_KINDS = ['signatureField' => 'signature', 'initialsField' => 'initials', 'dateSignedField' => 'date_signed'];
+
+    /** A field id or signer id: short, and safe in a name, a URL and a log line. */
+    public const FIELD_ID = '/^[A-Za-z0-9_-]{1,64}$/';
+
+    /** The longest field label. */
+    public const FIELD_LABEL_MAX = 200;
+
     /** @var list<string> */
     public const ALIGNMENTS = ['left', 'center', 'right', 'justify'];
 
@@ -82,7 +100,32 @@ final class Schema
      *
      * @return array<string, mixed>
      */
-    public static function jsonSchema(): array
+    public static function jsonSchema(bool $fields = false): array
+    {
+        $schema = self::modelSchema();
+        if ($fields) {
+            foreach (self::FIELD_TYPES as $type) {
+                $schema['$defs']['block']['oneOf'][] = [
+                    'type' => 'object',
+                    'required' => ['type', 'id', 'signer'],
+                    'additionalProperties' => false,
+                    'description' => 'A '.self::FIELD_KINDS[$type].' field for one signer (signing extension; pass fields: true). Laid out as a box; where it lands is reported in the placement map, never stored by hand.',
+                    'properties' => [
+                        'type' => ['const' => $type],
+                        'id' => ['type' => 'string', 'pattern' => '^[A-Za-z0-9_-]{1,64}$'],
+                        'signer' => ['type' => 'string', 'pattern' => '^[A-Za-z0-9_-]{1,64}$'],
+                        'required' => ['type' => 'boolean', 'description' => 'true by default.'],
+                        'label' => ['type' => 'string', 'maxLength' => self::FIELD_LABEL_MAX, 'description' => 'Drawn under the box.'],
+                    ],
+                ];
+            }
+        }
+
+        return $schema;
+    }
+
+    /** @return array<string, mixed> */
+    private static function modelSchema(): array
     {
         $hex = ['type' => 'string', 'pattern' => '^#[0-9A-Fa-f]{6}$'];
         $points = ['type' => 'number', 'description' => 'Points.'];
