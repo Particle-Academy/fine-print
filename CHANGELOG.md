@@ -42,6 +42,10 @@ fancy-sign (CC-fancy-0036 phase 0), and useful to any forms or stamping host.
   `MAX_COORD`). Text is written only as hex strings. Appending pages and a
   `/Sig` placeholder are not built yet (fancy-sign phase 2).
 
+### Changed
+
+- Rebranded the display name to Fancy Dev Kit (README and package description). Package names, the npm scope, URLs and the `fancy-ui` MCP id are unchanged.
+
 ## [0.7.1] - 2026-11-10
 
 **What you must do: nothing.** The agent guide's text changed; no code did.
