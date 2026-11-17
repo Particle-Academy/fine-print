@@ -8,6 +8,8 @@ BREAKING and says what a consumer must do.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-18
+
 **What you must do: nothing.** Everything below is opt-in and additive; a
 document without field nodes writes the same bytes as before. Built for
 fancy-sign (CC-fancy-0036 phase 0), and useful to any forms or stamping host.
