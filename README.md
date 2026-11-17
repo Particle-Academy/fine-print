@@ -21,6 +21,13 @@ no third-party PDF library. Just PHP 8.4 and its bundled `zlib`, `mbstring`,
 > available through the optional adapter below. Pre-1.0, breaking changes may
 > land in a minor release; the [changelog](CHANGELOG.md) marks each one.
 
+<!-- fancy-agents-note:start -->
+> **For agents.** This package is listed on the Fancy MCP catalog server at
+> `https://ui.particle.academy/mcp` (streamable HTTP, no API key; MCP id `fancy-ui`),
+> with install commands and docs, alongside the rest of the kit. How an agent
+> installs and uses this package is in [AGENTS.md](https://github.com/Particle-Academy/fine-print/blob/main/AGENTS.md).
+<!-- fancy-agents-note:end -->
+
 ## Why
 
 Sister project to [`holy-sheet`](https://github.com/Particle-Academy/holy-sheet)
