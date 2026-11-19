@@ -8,6 +8,23 @@ BREAKING and says what a consumer must do.
 
 ## [Unreleased]
 
+### Added
+
+- **Docs:** `AGENTS.md` gains "Letterhead on a PDF", the supported way to put a
+  `.docx` letterhead on a PDF: `LastWord\Agent::read($docx)`, merge its `page`
+  into the document (the document's own values win, as in last-word's
+  `templateParts` rule), then `validateAndRepair` and `toBytes`. Band images
+  pass through byte for byte. The portable exchange does not carry page setup
+  or bands, and `read.unrepresented` lists what a Word-authored letterhead lost.
+  No code changed; nothing to do.
+- Dev: `tests/Unit/Writer/LetterheadRouteTest.php` guards that route: it builds
+  the letterhead with last-word, writes it with fine-print, and asserts clean
+  validation, the bands' text on the right pages, the document-wins merge, the
+  band images' sha256 among the PDF's image streams, and that
+  `toPortable`/`fromPortable` carry no page. `particle-academy/last-word`
+  (`^0.21`, first-party) is a new dev dependency for it; it is not a runtime
+  dependency.
+
 ### Changed
 
 - CI: re-pin org third-party allowlist to 2614224
