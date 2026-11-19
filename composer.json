@@ -42,9 +42,13 @@
         "particle-academy/fancy-conformance": "0.47.0",
         "particle-academy/last-word": "^0.21"
     },
+    "conflict": {
+        "laravel/framework": "<13.0",
+        "illuminate/support": "<13.0"
+    },
     "suggest": {
-        "illuminate/cache": "Only needed for the optional Laravel page-image helper; core reading, writing and rendering need no framework.",
-        "illuminate/routing": "Only needed for the optional Laravel page-image route helper (Laravel 13)."
+        "illuminate/cache": "^13.0. Only needed for the optional Laravel page-image helper; core reading, writing and rendering need no framework.",
+        "illuminate/routing": "^13.0. Only needed for the optional Laravel page-image route helper."
     },
     "autoload": {
         "psr-4": {

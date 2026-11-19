@@ -27,6 +27,12 @@ BREAKING and says what a consumer must do.
 
 ### Changed
 
+- **BREAKING:** Laravel 13 is the minimum; an app on Laravel 12 or older can no
+  longer install this; upgrade Laravel. On Laravel 13, or without Laravel at
+  all, do nothing.
+- composer.json now declares `conflict: laravel/framework <13.0, illuminate/support <13.0`;
+  the core stays framework-free. The `suggest` entries for `illuminate/cache`
+  and `illuminate/routing` now state `^13.0`.
 - CI: re-pin org third-party allowlist to 2614224
 
 ## [0.8.0] - 2026-11-18
