@@ -8,6 +8,8 @@ BREAKING and says what a consumer must do.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-19
+
 ### Added
 
 - **Docs:** `AGENTS.md` gains "Letterhead on a PDF", the supported way to put a
